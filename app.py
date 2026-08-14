@@ -4,7 +4,7 @@ from fastapi import FastAPI,Request
 from fastapi.responses import HTMLResponse,JSONResponse
 from fastapi.templating import Jinja2Templates
 from engine import find_arbs
-
+from feeds import fetch_live_odds
 with open("config.json") as f: CFG=json.load(f)
 app=FastAPI(title="SA Arb Scanner Web")
 templates=Jinja2Templates(directory=".")
@@ -26,13 +26,24 @@ async def fetch(cfg):
     return [{**q,"bookmaker":q.get("bookmaker",cfg["bookmaker"])} for q in rows]
 
 async def scan():
-    q=[];e=[]
-    if CFG.get("demo_mode"): q+=demo()
-    for f in CFG.get("feeds",[]):
-        if f.get("enabled"):
-            try: q+=await fetch(f)
-            except Exception as x: e.append(f'{f["bookmaker"]}: {x}')
-    return q,find_arbs(q,CFG.get("max_quote_age_seconds",20),CFG.get("min_margin_percent",.10)),e
+    q = []
+    e = []
+
+    try:
+        q += await fetch_live_odds()
+    except Exception as x:
+        e.append(f"Odds API: {x}")
+
+    if CFG.get("demo_mode"):
+        q += demo()
+
+    opportunities = find_arbs(
+        q,
+        CFG.get("max_quote_age_seconds", 20),
+        CFG.get("min_margin_percent", 0.10)
+    )
+
+    return q, opportunities, e
 
 @app.get("/",response_class=HTMLResponse)
 def home(request: Request):
