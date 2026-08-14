@@ -1,0 +1,31 @@
+<!doctype html><html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b1220"><title>SA Arb Scanner</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#e5e7eb;font-family:system-ui,Arial}
+header{position:sticky;top:0;background:#111827;padding:18px 16px;z-index:2}h1{font-size:23px;margin:0}
+main{max-width:760px;margin:auto;padding:14px}.muted{color:#9ca3af;font-size:12px}
+.panel{background:#111827;border:1px solid #263244;border-radius:16px;padding:15px;margin:12px 0}
+input{width:100%;padding:12px;background:#0f172a;color:#fff;border:1px solid #334155;border-radius:9px;font-size:16px}
+.arb{border:2px solid #22c55e}.pct{font-size:27px;font-weight:800;color:#22c55e}
+.leg{display:flex;justify-content:space-between;border-bottom:1px solid #263244;padding:10px 0}
+.book{color:#93c5fd}.empty{text-align:center;padding:25px}
+</style></head><body>
+<header><h1>SA Arbitrage Scanner</h1><div class="muted">Hollywoodbets • Supabets • Betway</div><div id="status" class="muted">Connecting…</div></header>
+<main><div class="panel"><label>Total stake (R)</label><input id="stake" value="1000" type="number" min="1" step="10"></div>
+<div id="results"></div>
+<div class="panel muted"><b>Genuine arb test:</b> combined implied probability must be below 100%. Results are snapshots; odds can change or suspend.</div></main>
+<script>
+const money=x=>"R"+Number(x).toFixed(2);
+function render(d){
+ document.getElementById("status").textContent=`Online • ${d.opportunities.length} arb(s) • refreshed ${d.updated_at||"—"}`;
+ const stake=Number(document.getElementById("stake").value||1000),box=document.getElementById("results");
+ if(!d.opportunities.length){box.innerHTML='<div class="panel empty">No genuine arbitrage detected right now.</div>';return}
+ box.innerHTML=d.opportunities.map(o=>{
+  const legs=o.legs.map(l=>{const s=stake*(1/l.odds)/o.inverse_sum;return `<div class="leg"><span><b>${l.selection}</b><br><span class="book">${l.bookmaker}</span></span><span>${l.odds.toFixed(2)}<br><small>Stake ${money(s)}</small></span></div>`}).join("");
+  return `<div class="panel arb"><div class="muted">${o.sport} • ${o.league} • ${o.market}</div><h2>${o.event_name}</h2><div class="pct">${o.margin.toFixed(3)}% ARB</div>${legs}<div class="leg"><b>Gross return</b><b>${money(stake/o.inverse_sum)}</b></div></div>`
+ }).join("")
+}
+async function tick(){try{render(await(await fetch('/api/status',{cache:'no-store'})).json())}catch(e){document.getElementById("status").textContent="Scanner unavailable"}}
+document.getElementById("stake").addEventListener("input",tick);tick();setInterval(tick,3000);
+</script></body></html>
