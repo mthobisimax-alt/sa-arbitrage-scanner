@@ -54,7 +54,9 @@ def home(request: Request):
 
 @app.get("/api/status")
 def status(): return JSONResponse(latest)
-
+@app.get("/api/bookmakers")
+def bookmakers():
+    return sorted(list(set(q.get("bookmaker") for q in latest["quotes"] if q.get("bookmaker"))))
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web"}
 
