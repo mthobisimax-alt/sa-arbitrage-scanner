@@ -7,7 +7,7 @@ from engine import find_arbs
 
 with open("config.json") as f: CFG=json.load(f)
 app=FastAPI(title="SA Arb Scanner Web")
-templates=Jinja2Templates(directory="templates")
+templates=Jinja2Templates(directory=".")
 latest={"quotes":[],"opportunities":[],"updated_at":None,"errors":[]}
 
 def demo():
