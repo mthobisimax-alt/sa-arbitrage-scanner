@@ -35,7 +35,11 @@ async def scan():
     return q,find_arbs(q,CFG.get("max_quote_age_seconds",20),CFG.get("min_margin_percent",.10)),e
 
 @app.get("/",response_class=HTMLResponse)
-def home(request:Request): return templates.TemplateResponse("index.html",{"request":request})
+def home(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html"
+    )
 
 @app.get("/api/status")
 def status(): return JSONResponse(latest)
