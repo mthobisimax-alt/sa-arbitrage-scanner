@@ -2,7 +2,7 @@
   "poll_seconds": 5,
   "max_quote_age_seconds": 20,
   "min_margin_percent": 0.10,
-  "demo_mode": false,
+  "demo_mode": true,
 
   "feeds": [
     {
