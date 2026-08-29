@@ -1,72 +1,125 @@
-import os
 import httpx
 from datetime import datetime, timezone
 
 
-ODDS_API_KEY = os.getenv("ODDS_API_KEY")
-
-ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/soccer/odds/"
-
-
-async def fetch_live_odds():
+async def fetch_json_feed(cfg):
     """
-    Fetch soccer odds from The Odds API and convert them
-    into the format expected by engine.py.
+    Fetch one bookmaker's JSON feed and convert it into
+    the standard quote format used by engine.py.
     """
 
-    if not ODDS_API_KEY:
-        raise RuntimeError("ODDS_API_KEY is not configured")
+    url = cfg.get("url", "").strip()
 
-    params = {
-        "apiKey": ODDS_API_KEY,
-        "regions": "eu",
-        "markets": "h2h",
-        "oddsFormat": "decimal",
-    }
+    if not url:
+        raise RuntimeError(
+            f'No feed URL configured for {cfg.get("bookmaker", "Unknown")}'
+        )
 
-    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        response = await client.get(ODDS_API_URL, params=params)
+    headers = cfg.get("headers", {})
+
+    async with httpx.AsyncClient(
+        timeout=10,
+        follow_redirects=True
+    ) as client:
+
+        response = await client.get(
+            url,
+            headers=headers
+        )
+
         response.raise_for_status()
-        events = response.json()
+        data = response.json()
+
+    if isinstance(data, dict):
+        rows = data.get("odds", data.get("events", []))
+    else:
+        rows = data
+
+    if not isinstance(rows, list):
+        raise ValueError(
+            f'{cfg.get("bookmaker", "Unknown")} feed must return a JSON list'
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
 
     quotes = []
 
-    for event in events:
-        event_id = event.get("id")
-        sport = event.get("sport_title", "Soccer")
-        league = event.get("sport_title", "")
-        home = event.get("home_team")
-        away = event.get("away_team")
+    for row in rows:
 
-        event_name = f"{home} v {away}"
+        bookmaker = cfg.get("bookmaker", "Unknown")
 
-        bookmakers = event.get("bookmakers", [])
+        event_id = row.get("event_id") or row.get("id")
 
-        for bookmaker in bookmakers:
-            bookmaker_name = bookmaker.get("title", "Unknown")
+        home = row.get("home_team") or row.get("home")
+        away = row.get("away_team") or row.get("away")
 
-            for market in bookmaker.get("markets", []):
-                if market.get("key") != "h2h":
-                    continue
+        event_name = row.get("event_name")
 
-                for outcome in market.get("outcomes", []):
-                    selection = outcome.get("name")
-                    odds = outcome.get("price")
+        if not event_name and home and away:
+            event_name = f"{home} v {away}"
 
-                    if not selection or odds is None:
-                        continue
+        market = row.get("market", "match_result")
 
-                    quotes.append({
-                        "bookmaker": bookmaker_name,
-                        "event_id": event_id,
-                        "sport": "soccer",
-                        "league": league,
-                        "event_name": event_name,
-                        "market": "match_result",
-                        "line": "",
-                        "selection": selection,
-                        "odds": float(odds),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
+        line = row.get("line", "")
+
+        selection = row.get("selection")
+
+        odds = row.get("odds")
+
+        if not selection or odds is None:
+            continue
+
+        try:
+            odds = float(odds)
+        except (TypeError, ValueError):
+            continue
+
+        if odds <= 1:
+            continue
+
+        quotes.append({
+            "bookmaker": bookmaker,
+            "event_id": str(event_id) if event_id is not None else "",
+            "sport": row.get("sport", "soccer"),
+            "league": row.get("league", ""),
+            "event_name": event_name or "",
+            "market": market,
+            "line": line,
+            "selection": selection,
+            "odds": odds,
+            "timestamp": row.get("timestamp", now)
+        })
 
     return quotes
+
+
+async def fetch_all_feeds(config):
+    """
+    Fetch every enabled bookmaker feed.
+    """
+
+    quotes = []
+    errors = []
+
+    feeds = config.get("feeds", [])
+
+    for cfg in feeds:
+
+        if not cfg.get("enabled", False):
+            continue
+
+        bookmaker = cfg.get("bookmaker", "Unknown")
+
+        try:
+
+            feed_quotes = await fetch_json_feed(cfg)
+
+            quotes.extend(feed_quotes)
+
+        except Exception as exc:
+
+            errors.append(
+                f"{bookmaker}: {exc}"
+            )
+
+    return quotes, errors
