@@ -36,28 +36,71 @@ async def scan():
     quotes = []
     errors = []
 
-    feed_quotes, feed_errors = await fetch_all_feeds(CFG)
+    # TEST MODE
+    # This creates a known arbitrage opportunity so we can
+    # verify that the feed -> engine -> API pipeline works.
 
-    quotes.extend(feed_quotes)
-    errors.extend(feed_errors)
+    if CFG.get("demo_mode"):
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        quotes = [
+
+            {
+                "bookmaker": "Hollywoodbets",
+                "event_id": "test-event-001",
+                "sport": "soccer",
+                "league": "Test League",
+                "event_name": "Alpha FC v Beta FC",
+                "market": "match_result",
+                "line": "",
+                "selection": "Alpha FC",
+                "odds": 2.35,
+                "timestamp": now
+            },
+
+            {
+                "bookmaker": "Supabets",
+                "event_id": "test-event-001",
+                "sport": "soccer",
+                "league": "Test League",
+                "event_name": "Alpha FC v Beta FC",
+                "market": "match_result",
+                "line": "",
+                "selection": "Draw",
+                "odds": 4.10,
+                "timestamp": now
+            },
+
+            {
+                "bookmaker": "Betway",
+                "event_id": "test-event-001",
+                "sport": "soccer",
+                "league": "Test League",
+                "event_name": "Alpha FC v Beta FC",
+                "market": "match_result",
+                "line": "",
+                "selection": "Beta FC",
+                "odds": 4.00,
+                "timestamp": now
+            }
+        ]
+
+    else:
+
+        # LIVE FEED MODE
+        feed_quotes, feed_errors = await fetch_all_feeds(CFG)
+
+        quotes.extend(feed_quotes)
+        errors.extend(feed_errors)
 
     opportunities = find_arbs(
         quotes,
-        CFG.get(
-            "max_quote_age_seconds",
-            20
-        ),
-        CFG.get(
-            "min_margin_percent",
-            0.10
-        )
+        CFG.get("max_quote_age_seconds", 20),
+        CFG.get("min_margin_percent", 0.10)
     )
 
-    return (
-        quotes,
-        opportunities,
-        errors
-    )
+    return quotes, opportunities, errors
 
 
 @app.get(
