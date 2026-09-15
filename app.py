@@ -35,6 +35,20 @@ def feed_names():
     ]
 
 
+def detected_preferred_bookmakers(quotes):
+    live_names = {
+        str(q.get("bookmaker")).strip().lower(): str(q.get("bookmaker")).strip()
+        for q in quotes
+        if q.get("bookmaker")
+    }
+    detected = []
+    for preferred in preferred_bookmakers():
+        match = live_names.get(preferred.lower())
+        if match and match not in detected:
+            detected.append(match)
+    return detected
+
+
 latest = {
     "quotes": [],
     "opportunities": [],
@@ -42,6 +56,7 @@ latest = {
     "errors": [],
     "feed_names": feed_names(),
     "preferred_bookmakers": preferred_bookmakers(),
+    "preferred_detected": [],
 }
 
 
@@ -82,10 +97,9 @@ def status():
 @app.get("/api/bookmakers")
 def bookmakers():
     names = sorted({q.get("bookmaker") for q in latest["quotes"] if q.get("bookmaker")})
-    preferred = {name.lower() for name in preferred_bookmakers()}
     return {
         "live": names,
-        "preferred_present": [name for name in names if name.lower() in preferred],
+        "preferred_present": detected_preferred_bookmakers(latest["quotes"]),
         "preferred_configured": preferred_bookmakers(),
     }
 
@@ -112,6 +126,7 @@ async def scanner_loop():
                 "errors": errors,
                 "feed_names": feed_names(),
                 "preferred_bookmakers": preferred_bookmakers(),
+                "preferred_detected": detected_preferred_bookmakers(quotes),
             }
         except Exception as exc:
             latest["errors"] = [str(exc)]
