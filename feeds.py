@@ -1,208 +1,179 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
 
-STANDARD_FIELDS = (
-    "bookmaker",
-    "event_id",
-    "sport",
-    "league",
-    "event_name",
-    "market",
-    "line",
-    "selection",
-    "odds",
-    "timestamp",
-)
-
-
 def _resolve_env(value):
-    """Resolve values written as env:VARIABLE_NAME without exposing secrets in GitHub."""
     if not isinstance(value, str):
         return value
-
     if not value.startswith("env:"):
         return value
-
-    env_name = value[4:].strip()
-    if not env_name:
-        return ""
-
-    return os.getenv(env_name, "")
+    return os.getenv(value[4:].strip(), "")
 
 
-def _resolved_headers(headers):
-    return {
-        str(key): str(_resolve_env(value))
-        for key, value in (headers or {}).items()
-        if _resolve_env(value) not in (None, "")
+def _iso_timestamp(value):
+    if not value:
+        return datetime.now(timezone.utc).isoformat()
+    if isinstance(value, (int, float)):
+        # OddsPapi v5 uses milliseconds for changedAt; keep this tolerant.
+        if value > 10_000_000_000:
+            value = value / 1000
+        return datetime.fromtimestamp(value, timezone.utc).isoformat()
+    return str(value)
+
+
+def _selection_name(outcome_id, home, away):
+    mapping = {
+        "101": home,
+        "102": "Draw",
+        "103": away,
     }
+    return mapping.get(str(outcome_id))
 
 
-def _extract_rows(data, rows_key=None):
-    """Return a list of quote/event rows from a provider response."""
-    if isinstance(data, list):
-        return data
-
+def adapt_oddspapi_fixture(data):
+    """Normalize OddsPapi v4 Full Time Result (market 101) into engine.py quotes."""
     if not isinstance(data, dict):
         return []
 
-    if rows_key:
-        current = data
-        for part in str(rows_key).split("."):
-            if not isinstance(current, dict):
-                return []
-            current = current.get(part)
-        return current if isinstance(current, list) else []
-
-    for key in ("odds", "events", "data", "results"):
-        rows = data.get(key)
-        if isinstance(rows, list):
-            return rows
-
-    return []
-
-
-def _standard_quote(row, default_bookmaker="Unknown"):
-    """Convert an already-flat provider row to the quote format used by engine.py."""
-    now = datetime.now(timezone.utc).isoformat()
-
-    bookmaker = row.get("bookmaker") or default_bookmaker
-    event_id = row.get("event_id") or row.get("id")
-    home = row.get("home_team") or row.get("home")
-    away = row.get("away_team") or row.get("away")
-    event_name = row.get("event_name")
-
-    if not event_name and home and away:
-        event_name = f"{home} v {away}"
-
-    selection = row.get("selection")
-    odds = row.get("odds")
-
-    if not bookmaker or not selection or odds is None:
-        return None
-
-    try:
-        odds = float(odds)
-    except (TypeError, ValueError):
-        return None
-
-    if odds <= 1:
-        return None
-
-    return {
-        "bookmaker": str(bookmaker),
-        "event_id": str(event_id) if event_id is not None else "",
-        "sport": row.get("sport", "soccer"),
-        "league": row.get("league", ""),
-        "event_name": event_name or "",
-        "market": row.get("market", "match_result"),
-        "line": row.get("line", ""),
-        "selection": selection,
-        "odds": odds,
-        "timestamp": row.get("timestamp", now),
-    }
-
-
-def adapt_flat_json(data, cfg):
-    """Adapter for flat JSON rows. A single response may contain multiple bookmakers."""
-    rows = _extract_rows(data, cfg.get("rows_key"))
-    default_bookmaker = cfg.get("bookmaker", "Unknown")
-    allowed = {
-        str(name).lower()
-        for name in cfg.get("bookmakers", [])
-        if name
-    }
+    fixture_id = str(data.get("fixtureId", ""))
+    home = data.get("participant1Name", "")
+    away = data.get("participant2Name", "")
+    event_name = f"{home} v {away}" if home and away else fixture_id
+    league = data.get("tournamentName", "")
+    sport = data.get("sportName", "Soccer")
+    fallback_ts = data.get("updatedAt")
 
     quotes = []
-    for row in rows:
-        if not isinstance(row, dict):
+    for bookmaker, book_data in (data.get("bookmakerOdds") or {}).items():
+        if not isinstance(book_data, dict):
+            continue
+        if book_data.get("suspended") is True:
             continue
 
-        quote = _standard_quote(row, default_bookmaker)
-        if not quote:
+        markets = book_data.get("markets") or {}
+        market = markets.get("101") or markets.get(101)
+        if not isinstance(market, dict) or market.get("marketActive") is False:
             continue
 
-        if allowed and quote["bookmaker"].lower() not in allowed:
-            continue
+        for outcome_id, outcome_data in (market.get("outcomes") or {}).items():
+            selection = _selection_name(outcome_id, home, away)
+            if not selection or not isinstance(outcome_data, dict):
+                continue
 
-        quotes.append(quote)
+            players = outcome_data.get("players") or {}
+            player = players.get("0") or players.get(0)
+            if not isinstance(player, dict) or player.get("active") is False:
+                continue
+
+            try:
+                price = float(player.get("price"))
+            except (TypeError, ValueError):
+                continue
+            if price <= 1:
+                continue
+
+            quotes.append({
+                "bookmaker": str(bookmaker),
+                "event_id": fixture_id,
+                "sport": str(sport).lower(),
+                "league": league,
+                "event_name": event_name,
+                "market": "match_result",
+                "line": "",
+                "selection": selection,
+                "odds": price,
+                "timestamp": _iso_timestamp(
+                    player.get("bookmakerChangedAt")
+                    or player.get("changedAt")
+                    or fallback_ts
+                ),
+            })
 
     return quotes
 
 
-ADAPTERS = {
-    "flat_json": adapt_flat_json,
-    "json": adapt_flat_json,
-}
+async def fetch_oddspapi(cfg):
+    """
+    Fetch a deliberately small OddsPapi sample for integration testing.
+
+    One scan uses one fixtures request plus one odds request per selected fixture.
+    max_fixtures defaults to 1 to protect small/free request allowances.
+    """
+    api_key = _resolve_env(cfg.get("api_key", "env:ODDSPAPI_API_KEY"))
+    if not api_key:
+        raise RuntimeError("ODDSPAPI_API_KEY is not configured")
+
+    base_url = cfg.get("base_url", "https://api.oddspapi.io/v4").rstrip("/")
+    sport_id = int(cfg.get("sport_id", 10))  # Soccer in OddsPapi v4.
+    max_fixtures = max(1, int(cfg.get("max_fixtures", 1)))
+    hours_ahead = max(1, int(cfg.get("hours_ahead", 24)))
+    timeout = float(cfg.get("timeout_seconds", 20))
+
+    now = datetime.now(timezone.utc)
+    until = now + timedelta(hours=hours_ahead)
+    fixture_params = {
+        "apiKey": api_key,
+        "sportId": sport_id,
+        "from": now.isoformat().replace("+00:00", "Z"),
+        "to": until.isoformat().replace("+00:00", "Z"),
+        "statusId": 0,
+        "hasOdds": "true",
+        "language": "en",
+    }
+
+    quotes = []
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        fixture_response = await client.get(f"{base_url}/fixtures", params=fixture_params)
+        fixture_response.raise_for_status()
+        fixtures = fixture_response.json()
+        if not isinstance(fixtures, list):
+            raise RuntimeError("Unexpected OddsPapi fixtures response")
+
+        fixtures = [f for f in fixtures if isinstance(f, dict) and f.get("fixtureId")]
+        fixtures.sort(key=lambda f: str(f.get("startTime", "")))
+
+        for fixture in fixtures[:max_fixtures]:
+            odds_response = await client.get(
+                f"{base_url}/odds",
+                params={
+                    "apiKey": api_key,
+                    "fixtureId": fixture["fixtureId"],
+                    "oddsFormat": "decimal",
+                    "language": "en",
+                    "verbosity": 3,
+                },
+            )
+            odds_response.raise_for_status()
+            quotes.extend(adapt_oddspapi_fixture(odds_response.json()))
+
+    if not quotes:
+        raise RuntimeError("OddsPapi returned no usable Full Time Result quotes")
+    return quotes
 
 
 async def fetch_provider(cfg):
-    """Fetch one configured provider once, then normalize its response through an adapter."""
-    provider = cfg.get("name") or cfg.get("bookmaker") or "Unknown provider"
-    url = _resolve_env(cfg.get("url", ""))
+    provider = cfg.get("name") or "Unknown provider"
+    adapter = cfg.get("adapter", "oddspapi_v4")
 
-    if not url:
-        raise RuntimeError(f"No feed URL configured for {provider}")
+    if adapter == "oddspapi_v4":
+        return await fetch_oddspapi(cfg)
 
-    adapter_name = cfg.get("adapter", cfg.get("type", "flat_json"))
-    adapter = ADAPTERS.get(adapter_name)
-    if not adapter:
-        raise RuntimeError(f"Unsupported feed adapter '{adapter_name}' for {provider}")
-
-    headers = _resolved_headers(cfg.get("headers", {}))
-    params = {
-        str(key): _resolve_env(value)
-        for key, value in cfg.get("params", {}).items()
-        if _resolve_env(value) not in (None, "")
-    }
-
-    timeout = float(cfg.get("timeout_seconds", 15))
-
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        response = await client.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        data = response.json()
-
-    quotes = adapter(data, cfg)
-    if not quotes:
-        raise RuntimeError(f"{provider} returned no usable quotes")
-
-    return quotes
-
-
-async def fetch_json_feed(cfg):
-    """Backward-compatible wrapper for the original per-bookmaker JSON configuration."""
-    legacy_cfg = dict(cfg)
-    legacy_cfg.setdefault("adapter", "flat_json")
-    return await fetch_provider(legacy_cfg)
+    raise RuntimeError(f"Unsupported feed adapter '{adapter}' for {provider}")
 
 
 async def fetch_all_feeds(config):
-    """
-    Fetch all enabled sources.
-
-    Preferred configuration uses `providers`, allowing one API response to carry
-    Hollywoodbets, Betway ZA and Supabets together. The original `feeds` format
-    remains supported until a live provider is selected.
-    """
     quotes = []
     errors = []
-
-    providers = config.get("providers")
-    sources = providers if isinstance(providers, list) else config.get("feeds", [])
+    sources = config.get("providers", [])
 
     for cfg in sources:
         if not cfg.get("enabled", False):
             continue
-
-        source_name = cfg.get("name") or cfg.get("bookmaker") or "Unknown provider"
-
+        source_name = cfg.get("name") or "Unknown provider"
         try:
-            source_quotes = await fetch_provider(cfg)
-            quotes.extend(source_quotes)
+            quotes.extend(await fetch_provider(cfg))
         except Exception as exc:
             errors.append(f"{source_name}: {type(exc).__name__}: {exc}")
 
