@@ -49,9 +49,23 @@ def detected_preferred_bookmakers(quotes):
     return detected
 
 
+def preferred_opportunities(opportunities):
+    targets = {name.lower() for name in preferred_bookmakers()}
+    return [
+        opportunity
+        for opportunity in opportunities
+        if any(
+            str(leg.get("bookmaker", "")).strip().lower() in targets
+            for leg in opportunity.get("legs", [])
+        )
+    ]
+
+
 latest = {
     "quotes": [],
     "opportunities": [],
+    "preferred_opportunities": [],
+    "preferred_opportunity_count": 0,
     "updated_at": None,
     "errors": [],
     "feed_names": feed_names(),
@@ -94,6 +108,17 @@ def status():
     return JSONResponse(latest)
 
 
+@app.get("/api/sa-opportunities")
+def sa_opportunities():
+    return {
+        "preferred_bookmakers": latest["preferred_bookmakers"],
+        "preferred_detected": latest["preferred_detected"],
+        "count": latest["preferred_opportunity_count"],
+        "opportunities": latest["preferred_opportunities"],
+        "updated_at": latest["updated_at"],
+    }
+
+
 @app.get("/api/bookmakers")
 def bookmakers():
     names = sorted({q.get("bookmaker") for q in latest["quotes"] if q.get("bookmaker")})
@@ -119,9 +144,12 @@ async def scanner_loop():
     while True:
         try:
             quotes, opportunities, errors = await scan()
+            sa_opps = preferred_opportunities(opportunities)
             latest = {
                 "quotes": quotes,
                 "opportunities": opportunities,
+                "preferred_opportunities": sa_opps,
+                "preferred_opportunity_count": len(sa_opps),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "errors": errors,
                 "feed_names": feed_names(),
