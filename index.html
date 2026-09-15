@@ -11,7 +11,7 @@ input{width:100%;padding:12px;background:#0f172a;color:#fff;border:1px solid #33
 .leg{display:flex;justify-content:space-between;border-bottom:1px solid #263244;padding:10px 0}
 .book{color:#93c5fd}.empty{text-align:center;padding:25px}.preferred{color:#86efac;font-size:11px;margin-left:6px}
 </style></head><body>
-<header><h1>SA Arbitrage Scanner</h1><div id="feed" class="muted">Live feed: connecting…</div><div id="preferred" class="muted"></div><div id="status" class="muted">Connecting…</div></header>
+<header><h1>SA Arbitrage Scanner</h1><div id="feed" class="muted">Live feed: connecting…</div><div id="preferred" class="muted"></div><div id="detected" class="muted">Preferred SA targets detected: checking…</div><div id="status" class="muted">Connecting…</div></header>
 <main><div class="panel"><label>Total stake (R)</label><input id="stake" value="1000" type="number" min="1" step="10"></div>
 <div id="results"></div>
 <div class="panel muted"><b>Live-feed test:</b> opportunities may include international bookmakers. A listed bookmaker is not automatically verified as available to South African customers. Combined implied probability must be below 100%. Odds can change or suspend.</div></main>
@@ -19,8 +19,10 @@ input{width:100%;padding:12px;background:#0f172a;color:#fff;border:1px solid #33
 const money=x=>"R"+Number(x).toFixed(2);
 function render(d){
  const preferred=(d.preferred_bookmakers||[]),preferredSet=new Set(preferred.map(x=>String(x).toLowerCase()));
+ const detected=d.preferred_detected||[];
  document.getElementById("feed").textContent=`Live feed: ${(d.feed_names||[]).join(', ')||'—'}`;
  document.getElementById("preferred").textContent=`Preferred SA targets: ${preferred.join(' • ')||'—'}`;
+ document.getElementById("detected").textContent=`Preferred SA targets detected: ${detected.length?detected.join(' • '):'None in current sample'}`;
  document.getElementById("status").textContent=`Online • ${d.opportunities.length} arb(s) • refreshed ${d.updated_at||"—"}`;
  const stake=Number(document.getElementById("stake").value||1000),box=document.getElementById("results");
  if(!d.opportunities.length){box.innerHTML='<div class="panel empty">No genuine arbitrage detected right now.</div>';return}
