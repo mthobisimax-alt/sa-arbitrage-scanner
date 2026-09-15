@@ -13,12 +13,13 @@
       "base_url": "https://api.oddspapi.io/v4",
       "sport_id": 10,
       "hours_ahead": 24,
-      "max_fixtures": 1,
+      "max_fixtures": 3,
       "preferred_bookmakers": [
         "Hollywoodbets",
         "Betway",
         "Betway ZA",
-        "Supabets"
+        "Supabets",
+        "Sportingbet"
       ],
       "timeout_seconds": 20
     }
