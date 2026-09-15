@@ -12,9 +12,11 @@ input{width:100%;padding:12px;background:#0f172a;color:#fff;border:1px solid #33
 .book{color:#93c5fd}.empty{text-align:center;padding:25px}.preferred{color:#86efac;font-size:11px;margin-left:6px}
 .section{font-size:17px;margin:22px 4px 8px}.sa-section{color:#86efac}.global-section{color:#9ca3af}
 .badge{display:inline-block;font-size:11px;font-weight:700;color:#052e16;background:#86efac;border-radius:999px;padding:4px 8px;margin:7px 0}
+.sa-box{border:1px solid #166534;background:#0d1f18}.sa-title{font-size:18px;font-weight:800;color:#86efac;margin-bottom:6px}.sa-count{font-size:13px;color:#bbf7d0}.sa-none{color:#9ca3af;margin-top:10px}
 </style></head><body>
 <header><h1>SA Arbitrage Scanner</h1><div id="feed" class="muted">Live feed: connecting…</div><div id="preferred" class="muted"></div><div id="detected" class="muted">Preferred SA targets detected: checking…</div><div id="status" class="muted">Connecting…</div></header>
 <main><div class="panel"><label>Total stake (R)</label><input id="stake" value="1000" type="number" min="1" step="10"></div>
+<div id="sa-summary" class="panel sa-box"><div class="sa-title">SA-target opportunities</div><div id="sa-count" class="sa-count">Checking dedicated SA-target scan…</div><div id="sa-state" class="sa-none"></div></div>
 <div id="results"></div>
 <div class="panel muted"><b>Live-feed test:</b> opportunities may include international bookmakers. A listed bookmaker is not automatically verified as available to South African customers. Combined implied probability must be below 100%. Odds can change or suspend.</div></main>
 <script>
@@ -27,20 +29,25 @@ function renderArb(o,stake,preferredSet,isPreferred){
 function render(d){
  const preferred=(d.preferred_bookmakers||[]),preferredSet=new Set(preferred.map(x=>String(x).toLowerCase()));
  const detected=d.preferred_detected||[];
+ const saArbs=Array.isArray(d.preferred_opportunities)?d.preferred_opportunities:[];
+ const saCount=Number.isFinite(Number(d.preferred_opportunity_count))?Number(d.preferred_opportunity_count):saArbs.length;
  document.getElementById("feed").textContent=`Live feed: ${(d.feed_names||[]).join(', ')||'—'}`;
  document.getElementById("preferred").textContent=`Preferred SA targets: ${preferred.join(' • ')||'—'}`;
  document.getElementById("detected").textContent=`Preferred SA targets detected: ${detected.length?detected.join(' • '):'None in current sample'}`;
  document.getElementById("status").textContent=`Online • ${d.opportunities.length} arb(s) • refreshed ${d.updated_at||"—"}`;
+ document.getElementById("sa-count").textContent=`Dedicated scan: ${saCount} current opportunity${saCount===1?'':'ies'}`;
+ document.getElementById("sa-state").textContent=saCount?`Active preferred-target arbitrage detected. See ${saCount===1?'the opportunity':'opportunities'} first below.`:`${detected.length?detected.join(' • '):'No preferred bookmaker'} detected in the feed, but none currently forms part of a genuine arbitrage.`;
  const stake=Number(document.getElementById("stake").value||1000),box=document.getElementById("results");
  if(!d.opportunities.length){box.innerHTML='<div class="panel empty">No genuine arbitrage detected right now.</div>';return}
- const preferredArbs=[],globalArbs=[];
- for(const o of d.opportunities){const hit=(o.legs||[]).some(l=>preferredSet.has(String(l.bookmaker).toLowerCase()));(hit?preferredArbs:globalArbs).push(o)}
+ const saKeys=new Set(saArbs.map(o=>`${o.event_name}|${o.market}|${o.margin}`));
+ const preferredArbs=saArbs.length?saArbs:d.opportunities.filter(o=>(o.legs||[]).some(l=>preferredSet.has(String(l.bookmaker).toLowerCase())));
+ const preferredKeys=new Set(preferredArbs.map(o=>`${o.event_name}|${o.market}|${o.margin}`));
+ const globalArbs=d.opportunities.filter(o=>!preferredKeys.has(`${o.event_name}|${o.market}|${o.margin}`));
  let html='';
- if(preferredArbs.length){html+=`<h3 class="section sa-section">Preferred SA-target opportunities (${preferredArbs.length})</h3>`+preferredArbs.map(o=>renderArb(o,stake,preferredSet,true)).join('')}
- else{html+='<div class="panel empty muted">No current arbitrage includes a preferred SA target.</div>'}
+ if(preferredArbs.length){html+=`<h3 class="section sa-section">SA-target opportunities (${preferredArbs.length})</h3>`+preferredArbs.map(o=>renderArb(o,stake,preferredSet,true)).join('')}
  if(globalArbs.length){html+=`<h3 class="section global-section">Other live opportunities (${globalArbs.length})</h3>`+globalArbs.map(o=>renderArb(o,stake,preferredSet,false)).join('')}
  box.innerHTML=html;
 }
-async function tick(){try{render(await(await fetch('/api/status',{cache:'no-store'})).json())}catch(e){document.getElementById("status").textContent="Scanner unavailable"}}
+async function tick(){try{render(await(await fetch('/api/status',{cache:'no-store'})).json())}catch(e){document.getElementById("status").textContent="Scanner unavailable";document.getElementById("sa-count").textContent="Dedicated SA-target scan unavailable"}}
 document.getElementById("stake").addEventListener("input",tick);tick();setInterval(tick,3000);
 </script></body></html>
