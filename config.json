@@ -1,6 +1,6 @@
 {
   "poll_seconds": 5,
-  "max_quote_age_seconds": 20,
+  "max_quote_age_seconds": 300,
   "min_margin_percent": 0.10,
   "demo_mode": false,
 
@@ -13,7 +13,8 @@
       "headers": {
         "Authorization": "env:SA_ODDS_API_AUTH"
       },
-      "bookmakers": [
+      "bookmakers": [],
+      "preferred_bookmakers": [
         "Hollywoodbets",
         "Betway",
         "Betway ZA",
