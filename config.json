@@ -15,6 +15,7 @@
       "sport_id": 10,
       "hours_ahead": 24,
       "max_fixtures": 6,
+      "candidate_fixtures": 12,
       "max_quotes_per_fixture": 12000,
       "preferred_bookmakers": [
         "Hollywoodbets",
