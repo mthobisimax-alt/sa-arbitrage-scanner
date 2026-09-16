@@ -18,85 +18,82 @@ def _iso_timestamp(value):
 
 
 def _build_market_catalog(rows, sport_id=10):
-    catalog = {}
-    for row in rows if isinstance(rows, list) else []:
-        if not isinstance(row, dict) or int(row.get("sportId") or -1) != sport_id: continue
-        mid = str(row.get("marketId"))
-        outcomes = {str(o.get("outcomeId")): str(o.get("outcomeName") or "") for o in (row.get("outcomes") or []) if isinstance(o, dict)}
-        catalog[mid] = {
-            "name": str(row.get("marketName") or f"Football Market {mid}"),
-            "length": int(row.get("marketLength") or len(outcomes)),
-            "line": "" if row.get("handicap") is None else str(row.get("handicap")),
-            "period": str(row.get("period") or ""),
-            "type": str(row.get("marketType") or ""),
-            "player_prop": bool(row.get("playerProp")),
-            "outcomes": outcomes,
-        }
+    catalog={}
+    for row in rows if isinstance(rows,list) else []:
+        if not isinstance(row,dict) or int(row.get("sportId") or -1)!=sport_id: continue
+        mid=str(row.get("marketId")); outcomes={str(o.get("outcomeId")):str(o.get("outcomeName") or "") for o in (row.get("outcomes") or []) if isinstance(o,dict)}
+        catalog[mid]={"name":str(row.get("marketName") or f"Football Market {mid}"),"length":int(row.get("marketLength") or len(outcomes)),"line":"" if row.get("handicap") is None else str(row.get("handicap")),"period":str(row.get("period") or ""),"type":str(row.get("marketType") or ""),"player_prop":bool(row.get("playerProp")),"outcomes":outcomes}
     return catalog
 
 
-def _selection_name(meta, outcome_id, home, away):
-    label = str(meta.get("outcomes", {}).get(str(outcome_id), "")).strip()
-    low = label.lower()
-    if low in ("1", "home"): return home
-    if low in ("x", "draw"): return "Draw"
-    if low in ("2", "away"): return away
+def _selection_name(meta,outcome_id,home,away):
+    label=str(meta.get("outcomes",{}).get(str(outcome_id),"")).strip(); low=label.lower()
+    if low in ("1","home"): return home
+    if low in ("x","draw"): return "Draw"
+    if low in ("2","away"): return away
     return label
 
 
-def adapt_oddspapi_fixture(data, catalog, max_quotes=12000):
-    if not isinstance(data, dict): return []
-    fixture_id = str(data.get("fixtureId", "")); home = data.get("participant1Name", ""); away = data.get("participant2Name", "")
-    event_name = f"{home} v {away}" if home and away else fixture_id
-    league = data.get("tournamentName", ""); sport = data.get("sportName", "Soccer"); fallback_ts = data.get("updatedAt")
-    quotes = []
-    for bookmaker, book_data in (data.get("bookmakerOdds") or {}).items():
-        if not isinstance(book_data, dict) or book_data.get("suspended") is True: continue
-        fixture_url = book_data.get("fixturePath") or ""
-        for market_id, market_data in (book_data.get("markets") or {}).items():
-            meta = catalog.get(str(market_id))
-            # Unknown catalogs and player props stay excluded until explicitly supported.
-            if not meta or meta["player_prop"] or meta["length"] not in (2, 3): continue
-            if not isinstance(market_data, dict) or market_data.get("marketActive") is False: continue
-            for outcome_id, outcome_data in (market_data.get("outcomes") or {}).items():
-                selection = _selection_name(meta, outcome_id, home, away)
-                if not selection: continue
-                if not isinstance(outcome_data, dict): continue
-                players = outcome_data.get("players") or {}
-                # Standard match markets use player 0. This deliberately excludes props.
-                player = players.get("0") or players.get(0)
-                if not isinstance(player, dict) or player.get("active") is False: continue
-                try: price = float(player.get("price"))
-                except (TypeError, ValueError): continue
-                if price <= 1: continue
+def adapt_oddspapi_fixture(data,catalog,max_quotes=12000):
+    if not isinstance(data,dict): return []
+    fixture_id=str(data.get("fixtureId","")); home=data.get("participant1Name",""); away=data.get("participant2Name",""); event_name=f"{home} v {away}" if home and away else fixture_id; league=data.get("tournamentName",""); sport=data.get("sportName","Soccer"); fallback_ts=data.get("updatedAt"); quotes=[]
+    for bookmaker,book_data in (data.get("bookmakerOdds") or {}).items():
+        if not isinstance(book_data,dict) or book_data.get("suspended") is True: continue
+        fixture_url=book_data.get("fixturePath") or ""
+        for market_id,market_data in (book_data.get("markets") or {}).items():
+            meta=catalog.get(str(market_id))
+            if not meta or meta["player_prop"] or meta["length"] not in (2,3): continue
+            if not isinstance(market_data,dict) or market_data.get("marketActive") is False: continue
+            for outcome_id,outcome_data in (market_data.get("outcomes") or {}).items():
+                selection=_selection_name(meta,outcome_id,home,away)
+                if not selection or not isinstance(outcome_data,dict): continue
+                players=outcome_data.get("players") or {}; player=players.get("0") or players.get(0)
+                if not isinstance(player,dict) or player.get("active") is False: continue
+                try: price=float(player.get("price"))
+                except (TypeError,ValueError): continue
+                if price<=1: continue
                 quotes.append({"bookmaker":str(bookmaker),"bookmaker_url":fixture_url,"event_id":fixture_id,"sport":str(sport).lower(),"league":league,"event_name":event_name,"market":meta["name"],"market_id":str(market_id),"market_length":meta["length"],"market_type":meta["type"],"period":meta["period"],"line":meta["line"],"selection":selection,"odds":price,"timestamp":_iso_timestamp(player.get("bookmakerChangedAt") or player.get("changedAt") or fallback_ts)})
-                if len(quotes) >= max_quotes:
-                    print(f"SCANNER OddsPapi parser ceiling reached: {max_quotes} quotes", flush=True); return quotes
+                if len(quotes)>=max_quotes:
+                    print(f"SCANNER OddsPapi parser ceiling reached: {max_quotes} quotes",flush=True); return quotes
     return quotes
 
 
+def _preferred_present(quotes,preferred):
+    wanted={str(x).strip().lower() for x in preferred}; return sorted({str(q.get("bookmaker","")).strip().lower() for q in quotes if str(q.get("bookmaker","")).strip().lower() in wanted})
+
+
 async def fetch_oddspapi(cfg):
-    api_key = _resolve_env(cfg.get("api_key", "env:ODDSPAPI_API_KEY"))
+    api_key=_resolve_env(cfg.get("api_key","env:ODDSPAPI_API_KEY"))
     if not api_key: raise RuntimeError("ODDSPAPI_API_KEY is not configured")
-    base_url=cfg.get("base_url","https://api.oddspapi.io/v4").rstrip("/"); sport_id=int(cfg.get("sport_id",10)); max_fixtures=max(1,int(cfg.get("max_fixtures",1))); hours_ahead=max(1,int(cfg.get("hours_ahead",24))); timeout=min(30.0,max(5.0,float(cfg.get("timeout_seconds",15)))); max_quotes=max(500,int(cfg.get("max_quotes_per_fixture",12000)))
-    now=datetime.now(timezone.utc); until=now+timedelta(hours=hours_ahead)
-    fixture_params={"apiKey":api_key,"sportId":sport_id,"from":now.isoformat().replace("+00:00","Z"),"to":until.isoformat().replace("+00:00","Z"),"statusId":0,"hasOdds":"true","language":"en"}
-    print("SCANNER OddsPapi market catalog request starting",flush=True); quotes=[]
+    base_url=cfg.get("base_url","https://api.oddspapi.io/v4").rstrip("/"); sport_id=int(cfg.get("sport_id",10)); max_fixtures=max(1,int(cfg.get("max_fixtures",1))); candidate_fixtures=max(max_fixtures,int(cfg.get("candidate_fixtures",max_fixtures*3))); hours_ahead=max(1,int(cfg.get("hours_ahead",24))); timeout=min(30.0,max(5.0,float(cfg.get("timeout_seconds",15)))); max_quotes=max(500,int(cfg.get("max_quotes_per_fixture",12000))); preferred=cfg.get("preferred_bookmakers",[])
+    now=datetime.now(timezone.utc); until=now+timedelta(hours=hours_ahead); fixture_params={"apiKey":api_key,"sportId":sport_id,"from":now.isoformat().replace("+00:00","Z"),"to":until.isoformat().replace("+00:00","Z"),"statusId":0,"hasOdds":"true","language":"en"}
+    print("SCANNER OddsPapi market catalog request starting",flush=True); selected=[]; fallback=[]
     limits=httpx.Limits(max_connections=4,max_keepalive_connections=2)
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout),limits=limits,follow_redirects=True) as client:
         markets_response=await client.get(f"{base_url}/markets",params={"apiKey":api_key,"language":"en"}); markets_response.raise_for_status(); catalog=_build_market_catalog(markets_response.json(),sport_id)
         if not catalog: raise RuntimeError("OddsPapi football market catalog is empty")
-        print(f"SCANNER OddsPapi football market catalog loaded: {len(catalog)}",flush=True)
         fixture_response=await client.get(f"{base_url}/fixtures",params=fixture_params); fixture_response.raise_for_status(); fixtures=fixture_response.json()
         if not isinstance(fixtures,list): raise RuntimeError("Unexpected OddsPapi fixtures response")
         fixtures=[f for f in fixtures if isinstance(f,dict) and f.get("fixtureId")]; fixtures.sort(key=lambda f:str(f.get("startTime","")))
-        print(f"SCANNER OddsPapi fixtures received: {len(fixtures)}; sampling {min(len(fixtures),max_fixtures)}",flush=True)
-        for fixture in fixtures[:max_fixtures]:
-            fixture_id=fixture["fixtureId"]; print(f"SCANNER OddsPapi odds request starting fixture={fixture_id}",flush=True)
-            odds_response=await client.get(f"{base_url}/odds",params={"apiKey":api_key,"fixtureId":fixture_id,"oddsFormat":"decimal","language":"en","verbosity":3}); odds_response.raise_for_status()
-            fixture_quotes=adapt_oddspapi_fixture(odds_response.json(),catalog,max_quotes=max_quotes); quotes.extend(fixture_quotes); print(f"SCANNER OddsPapi fixture={fixture_id} normalized catalog quotes={len(fixture_quotes)}",flush=True)
+        candidates=fixtures[:candidate_fixtures]; print(f"SCANNER fixtures={len(fixtures)} probing up to {len(candidates)} to fill {max_fixtures} slots",flush=True)
+        for fixture in candidates:
+            if len(selected)>=max_fixtures: break
+            fixture_id=fixture["fixtureId"]
+            try:
+                odds_response=await client.get(f"{base_url}/odds",params={"apiKey":api_key,"fixtureId":fixture_id,"oddsFormat":"decimal","language":"en","verbosity":3}); odds_response.raise_for_status(); fq=adapt_oddspapi_fixture(odds_response.json(),catalog,max_quotes=max_quotes)
+            except Exception as exc:
+                print(f"SCANNER fixture={fixture_id} skipped {type(exc).__name__}: {exc}",flush=True); continue
+            present=_preferred_present(fq,preferred); item=(fixture,fq,present)
+            if present:
+                selected.append(item); print(f"SCANNER fixture={fixture_id} PRIORITY preferred={','.join(present)} quotes={len(fq)}",flush=True)
+            else:
+                fallback.append(item); print(f"SCANNER fixture={fixture_id} fallback quotes={len(fq)}",flush=True)
+        if len(selected)<max_fixtures:
+            selected.extend(fallback[:max_fixtures-len(selected)])
+    quotes=[q for _,fq,_ in selected for q in fq]
     if not quotes: raise RuntimeError("OddsPapi returned no usable catalog-backed football market quotes")
-    print(f"SCANNER OddsPapi scan completed quotes={len(quotes)}",flush=True); return quotes
+    print(f"SCANNER selected fixtures={len(selected)} preferred fixtures={sum(1 for _,_,p in selected if p)} quotes={len(quotes)} preferred detected={','.join(_preferred_present(quotes,preferred)) or 'none'}",flush=True)
+    return quotes
 
 
 async def fetch_provider(cfg):
