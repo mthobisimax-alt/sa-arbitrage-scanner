@@ -2,6 +2,7 @@
   "poll_seconds": 43200,
   "max_quote_age_seconds": 900,
   "min_margin_percent": 0.10,
+  "scan_timeout_seconds": 45,
   "demo_mode": false,
 
   "providers": [
@@ -13,7 +14,8 @@
       "base_url": "https://api.oddspapi.io/v4",
       "sport_id": 10,
       "hours_ahead": 24,
-      "max_fixtures": 3,
+      "max_fixtures": 6,
+      "max_quotes_per_fixture": 12000,
       "preferred_bookmakers": [
         "Hollywoodbets",
         "Betway",
