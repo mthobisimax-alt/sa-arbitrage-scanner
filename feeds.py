@@ -75,7 +75,7 @@ def _oddspapi_cfg(config):
     return None
 
 async def fetch_oddspapi_account(config):
-    """Read OddsPapi quota. /v4/account is unmetered and does not consume quota."""
+    """Read OddsPapi quota without ever exposing the API key in UI/errors."""
     cfg=_oddspapi_cfg(config)
     if not cfg: return {"available":False,"error":"OddsPapi provider is not enabled"}
     api_key=_resolve_env(cfg.get("api_key","env:ODDSPAPI_API_KEY"))
@@ -83,7 +83,19 @@ async def fetch_oddspapi_account(config):
     base_url=cfg.get("base_url","https://api.oddspapi.io/v4").rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(10.0),follow_redirects=True) as client:
-            response=await client.get(f"{base_url}/account",params={"apiKey":api_key}); response.raise_for_status(); data=response.json()
+            response=None
+            for attempt in range(3):
+                response=await client.get(f"{base_url}/account",params={"apiKey":api_key})
+                if response.status_code!=429: break
+                wait=1.2
+                try:
+                    body=response.json(); wait=max(wait,float((body.get("error") or {}).get("retryMs",0))/1000.0+0.15)
+                except Exception: pass
+                if attempt<2: await asyncio.sleep(min(wait,3.0))
+            if response is None: return {"available":False,"error":"OddsPapi quota check unavailable","checked_at":datetime.now(timezone.utc).isoformat()}
+            if response.status_code==429: return {"available":False,"error":"OddsPapi quota check temporarily rate-limited; retrying on the next scan","checked_at":datetime.now(timezone.utc).isoformat()}
+            if response.status_code>=400: return {"available":False,"error":f"OddsPapi quota check returned HTTP {response.status_code}","checked_at":datetime.now(timezone.utc).isoformat()}
+            data=response.json()
         subscriptions=data.get("subscriptions") or []
         active=next((s for s in subscriptions if isinstance(s,dict) and s.get("is_active") is True),None)
         if active is None and subscriptions: active=subscriptions[0] if isinstance(subscriptions[0],dict) else None
@@ -92,8 +104,8 @@ async def fetch_oddspapi_account(config):
         try: remaining=max(0,int(limit)-int(used)) if limit is not None and used is not None else None
         except (TypeError,ValueError): remaining=None
         return {"available":True,"request_limit":limit,"request_count":used,"requests_remaining":remaining,"last_request":active.get("last_request"),"valid_from":active.get("valid_from"),"valid_until":active.get("valid_until"),"checked_at":datetime.now(timezone.utc).isoformat()}
-    except Exception as exc:
-        return {"available":False,"error":f"{type(exc).__name__}: {exc}","checked_at":datetime.now(timezone.utc).isoformat()}
+    except Exception:
+        return {"available":False,"error":"OddsPapi quota check temporarily unavailable","checked_at":datetime.now(timezone.utc).isoformat()}
 
 async def fetch_oddspapi(cfg):
     api_key=_resolve_env(cfg.get("api_key","env:ODDSPAPI_API_KEY"))
@@ -112,7 +124,7 @@ async def fetch_oddspapi(cfg):
                 try:
                     response=await client.get(f"{base_url}/odds",params={"apiKey":api_key,"fixtureId":fixture_id,"oddsFormat":"decimal","language":"en","verbosity":3}); response.raise_for_status(); fq=adapt_oddspapi_fixture(response.json(),catalog,max_quotes=max_quotes); present=_preferred_present(fq,preferred); return fixture,fq,present
                 except Exception as exc:
-                    print(f"SCANNER fixture={fixture_id} skipped {type(exc).__name__}: {exc}",flush=True); return fixture,[],[]
+                    print(f"SCANNER fixture={fixture_id} skipped {type(exc).__name__} HTTP={getattr(getattr(exc,'response',None),'status_code',None)}",flush=True); return fixture,[],[]
         results=await asyncio.gather(*(probe(f) for f in candidates))
     usable=[r for r in results if r[1]]; priority=[r for r in usable if r[2]]; ordinary=[r for r in usable if not r[2]]; selected=(priority+ordinary)[:max_fixtures]; quotes=[q for _,fq,_ in selected for q in fq]
     if not quotes: raise RuntimeError("OddsPapi returned no usable catalog-backed football market quotes")
@@ -130,6 +142,8 @@ async def fetch_all_feeds(config):
         source_name=cfg.get("name") or "Unknown provider"
         try: quotes.extend(await fetch_provider(cfg))
         except Exception as exc:
-            message=f"{source_name}: {type(exc).__name__}: {exc}"; print(f"SCANNER ERROR {message}",flush=True); errors.append(message)
+            status=getattr(getattr(exc,"response",None),"status_code",None)
+            message=f"{source_name}: {type(exc).__name__}"+(f" HTTP {status}" if status else "")
+            print(f"SCANNER ERROR {message}",flush=True); errors.append(message)
     if not any(cfg.get("enabled",False) for cfg in sources): errors.append("No live odds provider is enabled")
     return quotes,errors
