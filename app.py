@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from engine import find_arbs, find_preferred_arbs
-from feeds import fetch_all_feeds
+from feeds import fetch_all_feeds, fetch_oddspapi_account
 
 with open("config.json") as f: CFG=json.load(f)
 app=FastAPI(title="SA Arb Scanner Web"); templates=Jinja2Templates(directory=".")
@@ -23,7 +23,7 @@ def detected_preferred_bookmakers(quotes):
     live={str(q.get("bookmaker")).strip().lower():str(q.get("bookmaker")).strip() for q in quotes if q.get("bookmaker")}
     return [live[p.lower()] for p in preferred_bookmakers() if p.lower() in live]
 
-latest={"quotes":[],"opportunities":[],"preferred_opportunities":[],"preferred_opportunity_count":0,"updated_at":None,"errors":[],"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":[],"scan_state":"starting"}
+latest={"quotes":[],"opportunities":[],"preferred_opportunities":[],"preferred_opportunity_count":0,"updated_at":None,"errors":[],"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":[],"scan_state":"starting","quota":{"available":False}}
 
 async def scan():
     quotes=[]; errors=[]
@@ -35,14 +35,15 @@ async def scan():
     else:
         feed_quotes,feed_errors=await fetch_all_feeds(CFG); quotes.extend(feed_quotes); errors.extend(feed_errors)
     age=CFG.get("max_quote_age_seconds",20); margin=CFG.get("min_margin_percent",0.10)
-    opportunities=find_arbs(quotes,age,margin)
-    preferred=find_preferred_arbs(quotes,preferred_bookmakers(),age,margin)
+    opportunities=find_arbs(quotes,age,margin); preferred=find_preferred_arbs(quotes,preferred_bookmakers(),age,margin)
     return quotes,opportunities,preferred,errors
 
 @app.get("/",response_class=HTMLResponse)
 def home(request:Request): return templates.TemplateResponse(request=request,name="index.html")
 @app.get("/api/status")
 def status(): return JSONResponse(latest)
+@app.get("/api/quota")
+async def quota(): return JSONResponse(await fetch_oddspapi_account(CFG))
 @app.get("/api/sa-opportunities")
 def sa_opportunities(): return {"preferred_bookmakers":latest["preferred_bookmakers"],"preferred_detected":latest["preferred_detected"],"count":latest["preferred_opportunity_count"],"opportunities":latest["preferred_opportunities"],"updated_at":latest["updated_at"]}
 @app.get("/api/bookmakers")
@@ -60,13 +61,18 @@ async def scanner_loop():
     while True:
         latest["scan_state"]="fetching"; print(f"SCANNER cycle starting at {datetime.now(timezone.utc).isoformat()} timeout={scan_timeout}s",flush=True)
         try:
+            before=await fetch_oddspapi_account(CFG)
             quotes,opportunities,sa_opps,errors=await asyncio.wait_for(scan(),timeout=scan_timeout)
-            latest={"quotes":quotes,"opportunities":opportunities,"preferred_opportunities":sa_opps,"preferred_opportunity_count":len(sa_opps),"updated_at":datetime.now(timezone.utc).isoformat(),"errors":errors,"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":detected_preferred_bookmakers(quotes),"scan_state":"ok" if not errors else "completed_with_errors"}
-            print(f"SCANNER cycle completed quotes={len(quotes)} arbs={len(opportunities)} preferred_arbs={len(sa_opps)} errors={len(errors)}",flush=True)
+            after=await fetch_oddspapi_account(CFG)
+            if before.get("available") and after.get("available"):
+                try: after["last_scan_requests"]=max(0,int(after.get("request_count",0))-int(before.get("request_count",0)))
+                except (TypeError,ValueError): after["last_scan_requests"]=None
+            latest={"quotes":quotes,"opportunities":opportunities,"preferred_opportunities":sa_opps,"preferred_opportunity_count":len(sa_opps),"updated_at":datetime.now(timezone.utc).isoformat(),"errors":errors,"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":detected_preferred_bookmakers(quotes),"scan_state":"ok" if not errors else "completed_with_errors","quota":after}
+            print(f"SCANNER cycle completed quotes={len(quotes)} arbs={len(opportunities)} preferred_arbs={len(sa_opps)} requests_used={after.get('last_scan_requests')} quota={after.get('request_count')}/{after.get('request_limit')} errors={len(errors)}",flush=True)
         except asyncio.TimeoutError:
-            message=f"Scanner cycle timed out after {scan_timeout} seconds"; latest["errors"]=[message]; latest["updated_at"]=datetime.now(timezone.utc).isoformat(); latest["scan_state"]="timeout"; print(f"SCANNER ERROR {message}",flush=True)
+            message=f"Scanner cycle timed out after {scan_timeout} seconds"; latest["errors"]=[message]; latest["updated_at"]=datetime.now(timezone.utc).isoformat(); latest["scan_state"]="timeout"; latest["quota"]=await fetch_oddspapi_account(CFG); print(f"SCANNER ERROR {message}",flush=True)
         except Exception as exc:
-            message=f"Scanner cycle failed: {type(exc).__name__}: {exc}"; latest["errors"]=[message]; latest["updated_at"]=datetime.now(timezone.utc).isoformat(); latest["scan_state"]="error"; print(f"SCANNER ERROR {message}",flush=True)
+            message=f"Scanner cycle failed: {type(exc).__name__}: {exc}"; latest["errors"]=[message]; latest["updated_at"]=datetime.now(timezone.utc).isoformat(); latest["scan_state"]="error"; latest["quota"]=await fetch_oddspapi_account(CFG); print(f"SCANNER ERROR {message}",flush=True)
         await asyncio.sleep(CFG.get("poll_seconds",5))
 
 if __name__=="__main__":
