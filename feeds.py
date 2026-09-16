@@ -69,6 +69,32 @@ def adapt_oddspapi_fixture(data,catalog,max_quotes=12000):
 def _preferred_present(quotes,preferred):
     wanted={str(x).strip().lower() for x in preferred}; return sorted({str(q.get("bookmaker","")).strip().lower() for q in quotes if str(q.get("bookmaker","")).strip().lower() in wanted})
 
+def _oddspapi_cfg(config):
+    for cfg in config.get("providers",[]):
+        if cfg.get("enabled",False) and cfg.get("adapter","oddspapi_v4")=="oddspapi_v4": return cfg
+    return None
+
+async def fetch_oddspapi_account(config):
+    """Read OddsPapi quota. /v4/account is unmetered and does not consume quota."""
+    cfg=_oddspapi_cfg(config)
+    if not cfg: return {"available":False,"error":"OddsPapi provider is not enabled"}
+    api_key=_resolve_env(cfg.get("api_key","env:ODDSPAPI_API_KEY"))
+    if not api_key: return {"available":False,"error":"ODDSPAPI_API_KEY is not configured"}
+    base_url=cfg.get("base_url","https://api.oddspapi.io/v4").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0),follow_redirects=True) as client:
+            response=await client.get(f"{base_url}/account",params={"apiKey":api_key}); response.raise_for_status(); data=response.json()
+        subscriptions=data.get("subscriptions") or []
+        active=next((s for s in subscriptions if isinstance(s,dict) and s.get("is_active") is True),None)
+        if active is None and subscriptions: active=subscriptions[0] if isinstance(subscriptions[0],dict) else None
+        if not active: return {"available":False,"error":"No OddsPapi subscription information returned"}
+        limit=active.get("request_limit"); used=active.get("request_count")
+        try: remaining=max(0,int(limit)-int(used)) if limit is not None and used is not None else None
+        except (TypeError,ValueError): remaining=None
+        return {"available":True,"request_limit":limit,"request_count":used,"requests_remaining":remaining,"last_request":active.get("last_request"),"valid_from":active.get("valid_from"),"valid_until":active.get("valid_until"),"checked_at":datetime.now(timezone.utc).isoformat()}
+    except Exception as exc:
+        return {"available":False,"error":f"{type(exc).__name__}: {exc}","checked_at":datetime.now(timezone.utc).isoformat()}
+
 async def fetch_oddspapi(cfg):
     api_key=_resolve_env(cfg.get("api_key","env:ODDSPAPI_API_KEY"))
     if not api_key: raise RuntimeError("ODDSPAPI_API_KEY is not configured")
