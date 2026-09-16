@@ -1,4 +1,5 @@
 import os
+import asyncio
 from datetime import datetime, timedelta, timezone
 import httpx
 
@@ -11,13 +12,13 @@ def _resolve_env(value):
 
 def _iso_timestamp(value):
     if not value: return datetime.now(timezone.utc).isoformat()
-    if isinstance(value, (int, float)):
-        if value > 10_000_000_000: value = value / 1000
-        return datetime.fromtimestamp(value, timezone.utc).isoformat()
+    if isinstance(value,(int,float)):
+        if value>10_000_000_000: value=value/1000
+        return datetime.fromtimestamp(value,timezone.utc).isoformat()
     return str(value)
 
 
-def _build_market_catalog(rows, sport_id=10):
+def _build_market_catalog(rows,sport_id=10):
     catalog={}
     for row in rows if isinstance(rows,list) else []:
         if not isinstance(row,dict) or int(row.get("sportId") or -1)!=sport_id: continue
@@ -53,8 +54,7 @@ def adapt_oddspapi_fixture(data,catalog,max_quotes=12000):
                 except (TypeError,ValueError): continue
                 if price<=1: continue
                 quotes.append({"bookmaker":str(bookmaker),"bookmaker_url":fixture_url,"event_id":fixture_id,"sport":str(sport).lower(),"league":league,"event_name":event_name,"market":meta["name"],"market_id":str(market_id),"market_length":meta["length"],"market_type":meta["type"],"period":meta["period"],"line":meta["line"],"selection":selection,"odds":price,"timestamp":_iso_timestamp(player.get("bookmakerChangedAt") or player.get("changedAt") or fallback_ts)})
-                if len(quotes)>=max_quotes:
-                    print(f"SCANNER OddsPapi parser ceiling reached: {max_quotes} quotes",flush=True); return quotes
+                if len(quotes)>=max_quotes: return quotes
     return quotes
 
 
@@ -65,35 +65,28 @@ def _preferred_present(quotes,preferred):
 async def fetch_oddspapi(cfg):
     api_key=_resolve_env(cfg.get("api_key","env:ODDSPAPI_API_KEY"))
     if not api_key: raise RuntimeError("ODDSPAPI_API_KEY is not configured")
-    base_url=cfg.get("base_url","https://api.oddspapi.io/v4").rstrip("/"); sport_id=int(cfg.get("sport_id",10)); max_fixtures=max(1,int(cfg.get("max_fixtures",1))); candidate_fixtures=max(max_fixtures,int(cfg.get("candidate_fixtures",max_fixtures*3))); hours_ahead=max(1,int(cfg.get("hours_ahead",24))); timeout=min(30.0,max(5.0,float(cfg.get("timeout_seconds",15)))); max_quotes=max(500,int(cfg.get("max_quotes_per_fixture",12000))); preferred=cfg.get("preferred_bookmakers",[])
+    base_url=cfg.get("base_url","https://api.oddspapi.io/v4").rstrip("/"); sport_id=int(cfg.get("sport_id",10)); max_fixtures=max(1,int(cfg.get("max_fixtures",1))); candidate_fixtures=max(max_fixtures,int(cfg.get("candidate_fixtures",max_fixtures*2))); concurrency=max(1,min(4,int(cfg.get("probe_concurrency",3)))); hours_ahead=max(1,int(cfg.get("hours_ahead",24))); timeout=min(20.0,max(5.0,float(cfg.get("timeout_seconds",12)))); max_quotes=max(500,int(cfg.get("max_quotes_per_fixture",12000))); preferred=cfg.get("preferred_bookmakers",[])
     now=datetime.now(timezone.utc); until=now+timedelta(hours=hours_ahead); fixture_params={"apiKey":api_key,"sportId":sport_id,"from":now.isoformat().replace("+00:00","Z"),"to":until.isoformat().replace("+00:00","Z"),"statusId":0,"hasOdds":"true","language":"en"}
-    print("SCANNER OddsPapi market catalog request starting",flush=True); selected=[]; fallback=[]
-    limits=httpx.Limits(max_connections=4,max_keepalive_connections=2)
+    limits=httpx.Limits(max_connections=concurrency+2,max_keepalive_connections=concurrency+1)
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout),limits=limits,follow_redirects=True) as client:
         markets_response=await client.get(f"{base_url}/markets",params={"apiKey":api_key,"language":"en"}); markets_response.raise_for_status(); catalog=_build_market_catalog(markets_response.json(),sport_id)
         if not catalog: raise RuntimeError("OddsPapi football market catalog is empty")
         fixture_response=await client.get(f"{base_url}/fixtures",params=fixture_params); fixture_response.raise_for_status(); fixtures=fixture_response.json()
         if not isinstance(fixtures,list): raise RuntimeError("Unexpected OddsPapi fixtures response")
-        fixtures=[f for f in fixtures if isinstance(f,dict) and f.get("fixtureId")]; fixtures.sort(key=lambda f:str(f.get("startTime","")))
-        candidates=fixtures[:candidate_fixtures]; print(f"SCANNER fixtures={len(fixtures)} probing up to {len(candidates)} to fill {max_fixtures} slots",flush=True)
-        for fixture in candidates:
-            if len(selected)>=max_fixtures: break
+        fixtures=[f for f in fixtures if isinstance(f,dict) and f.get("fixtureId")]; fixtures.sort(key=lambda f:str(f.get("startTime",""))); candidates=fixtures[:candidate_fixtures]
+        print(f"SCANNER fixtures={len(fixtures)} concurrent probe={len(candidates)} concurrency={concurrency}",flush=True)
+        sem=asyncio.Semaphore(concurrency)
+        async def probe(fixture):
             fixture_id=fixture["fixtureId"]
-            try:
-                odds_response=await client.get(f"{base_url}/odds",params={"apiKey":api_key,"fixtureId":fixture_id,"oddsFormat":"decimal","language":"en","verbosity":3}); odds_response.raise_for_status(); fq=adapt_oddspapi_fixture(odds_response.json(),catalog,max_quotes=max_quotes)
-            except Exception as exc:
-                print(f"SCANNER fixture={fixture_id} skipped {type(exc).__name__}: {exc}",flush=True); continue
-            present=_preferred_present(fq,preferred); item=(fixture,fq,present)
-            if present:
-                selected.append(item); print(f"SCANNER fixture={fixture_id} PRIORITY preferred={','.join(present)} quotes={len(fq)}",flush=True)
-            else:
-                fallback.append(item); print(f"SCANNER fixture={fixture_id} fallback quotes={len(fq)}",flush=True)
-        if len(selected)<max_fixtures:
-            selected.extend(fallback[:max_fixtures-len(selected)])
-    quotes=[q for _,fq,_ in selected for q in fq]
+            async with sem:
+                try:
+                    response=await client.get(f"{base_url}/odds",params={"apiKey":api_key,"fixtureId":fixture_id,"oddsFormat":"decimal","language":"en","verbosity":3}); response.raise_for_status(); fq=adapt_oddspapi_fixture(response.json(),catalog,max_quotes=max_quotes); present=_preferred_present(fq,preferred); print(f"SCANNER fixture={fixture_id} quotes={len(fq)} preferred={','.join(present) or 'none'}",flush=True); return fixture,fq,present
+                except Exception as exc:
+                    print(f"SCANNER fixture={fixture_id} skipped {type(exc).__name__}: {exc}",flush=True); return fixture,[],[]
+        results=await asyncio.gather(*(probe(f) for f in candidates))
+    usable=[r for r in results if r[1]]; priority=[r for r in usable if r[2]]; ordinary=[r for r in usable if not r[2]]; selected=(priority+ordinary)[:max_fixtures]; quotes=[q for _,fq,_ in selected for q in fq]
     if not quotes: raise RuntimeError("OddsPapi returned no usable catalog-backed football market quotes")
-    print(f"SCANNER selected fixtures={len(selected)} preferred fixtures={sum(1 for _,_,p in selected if p)} quotes={len(quotes)} preferred detected={','.join(_preferred_present(quotes,preferred)) or 'none'}",flush=True)
-    return quotes
+    print(f"SCANNER selected={len(selected)} priority={len(priority)} quotes={len(quotes)} preferred={','.join(_preferred_present(quotes,preferred)) or 'none'}",flush=True); return quotes
 
 
 async def fetch_provider(cfg):
