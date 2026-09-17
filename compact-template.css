@@ -1,26 +1,26 @@
-/* Compact sizing to match the approved reference template */
+/* Extra-compact sizing to match the approved reference template */
 .content{padding:0 14px 20px}
-.card{margin:7px 0;border-radius:13px}
-.status{min-height:82px;padding:9px 11px;grid-template-columns:34px 1fr 72px;gap:8px}
-.dot{width:29px;height:29px}
-.status-main{font-size:15px}
-.feed{font-size:11px}
-#quotaLine{font-size:10px}
-.clock{font-size:13px;padding-left:8px}
-.clock .svgico{width:18px!important;height:18px!important}
-.clock small{font-size:8px}
-.quota{gap:8px}
-.metric{min-height:58px;padding:8px 10px;gap:8px}
-.metric .svgico{width:29px;height:29px;flex:0 0 29px}
-.metric strong{font-size:16px}
-.metric span:last-child{font-size:10px}
-.stake{padding:6px 9px;margin-top:8px}
-.stake label{font-size:11px;margin-bottom:3px}
-.stake input{height:36px;border-radius:8px;padding:4px 9px;font-size:17px}
-.sports{gap:7px;margin-top:8px}
-.sport{min-height:59px;padding:6px 2px;border-radius:11px;font-size:10px}
-.sport b{font-size:20px;margin-bottom:2px}
-.scan{margin:9px 0;padding:11px;font-size:17px;border-radius:12px}
-.scan svg{width:23px;height:23px}
-.info{padding:10px}
-@media(max-width:420px){.content{padding:0 12px 18px}.status{min-height:76px;grid-template-columns:30px 1fr 65px}.dot{width:26px;height:26px}.status-main{font-size:14px}.feed{font-size:10px}.metric{min-height:54px;padding:7px 8px}.metric .svgico{width:26px;height:26px;flex-basis:26px}.metric strong{font-size:15px}.stake input{height:34px;font-size:16px}.sport{min-height:55px;font-size:9.5px}.sport b{font-size:19px}.scan{font-size:16px;padding:10px}}
+.card{margin:6px 0;border-radius:12px}
+.status{min-height:64px;padding:6px 9px;grid-template-columns:28px 1fr 62px;gap:7px}
+.dot{width:24px;height:24px}
+.status-main{font-size:13px}
+.feed{font-size:10px}
+#quotaLine{font-size:9px}
+.clock{font-size:11px;padding-left:7px}
+.clock .svgico{width:15px!important;height:15px!important}
+.clock small{font-size:7px}
+.quota{gap:7px}
+.metric{min-height:44px;padding:5px 8px;gap:7px}
+.metric .svgico{width:23px;height:23px;flex:0 0 23px}
+.metric strong{font-size:14px}
+.metric span:last-child{font-size:9px}
+.stake{padding:5px 8px;margin-top:7px}
+.stake label{font-size:10px;margin-bottom:2px}
+.stake input{height:30px;border-radius:7px;padding:3px 8px;font-size:15px}
+.sports{gap:6px;margin-top:7px}
+.sport{min-height:48px;padding:4px 2px;border-radius:10px;font-size:9px}
+.sport b{font-size:17px;margin-bottom:1px}
+.scan{margin:8px 0;padding:9px;font-size:16px;border-radius:11px}
+.scan svg{width:21px;height:21px}
+.info{padding:9px}
+@media(max-width:420px){.content{padding:0 12px 18px}.status{min-height:58px;padding:5px 8px;grid-template-columns:25px 1fr 57px}.dot{width:22px;height:22px}.status-main{font-size:12px}.feed{font-size:9px}#quotaLine{font-size:8px}.clock{font-size:10px}.metric{min-height:40px;padding:4px 7px}.metric .svgico{width:21px;height:21px;flex-basis:21px}.metric strong{font-size:13px}.metric span:last-child{font-size:8.5px}.stake{padding:4px 7px}.stake input{height:28px;font-size:14px}.sport{min-height:44px;font-size:8.5px}.sport b{font-size:16px}.scan{font-size:15px;padding:8px}}
