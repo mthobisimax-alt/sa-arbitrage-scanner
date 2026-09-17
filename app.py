@@ -71,9 +71,14 @@ async def run_scan_if_allowed():
             latest["scan_state"]="error"; latest["errors"]=[f"Scanner cycle failed: {type(exc).__name__}: {exc}"]; return {"started":True,"reason":"error"}
 
 @app.get("/",response_class=HTMLResponse)
-def home(request:Request): return templates.TemplateResponse(request=request,name="index.html")
+def home(request:Request):
+    with open("index.html",encoding="utf-8") as f: html=f.read()
+    html=html.replace("</head>",'<link rel="stylesheet" href="/compact-template.css?v=1"></head>')
+    return HTMLResponse(html,headers={"Cache-Control":"no-store"})
 @app.get("/hero-template.webp")
 def hero_template(): return FileResponse("hero-template.webp",media_type="image/webp",headers={"Cache-Control":"public, max-age=3600"})
+@app.get("/compact-template.css")
+def compact_template(): return FileResponse("compact-template.css",media_type="text/css",headers={"Cache-Control":"no-store"})
 @app.get("/api/status")
 def status(): return JSONResponse(latest)
 @app.post("/api/scan")
