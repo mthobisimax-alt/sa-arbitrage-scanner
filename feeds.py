@@ -190,9 +190,22 @@ async def fetch_sportsgameodds(cfg):
         if cfg.get("optional",False): return []
         raise RuntimeError("SPORTSGAMEODDS_API_KEY is not configured")
     base_url=cfg.get("base_url","https://api.sportsgameodds.com/v2").rstrip("/"); timeout=min(20.0,max(5.0,float(cfg.get("timeout_seconds",15)))); max_events=max(1,min(100,int(cfg.get("max_events",12))))
-    params={"sportID":cfg.get("sport_id","SOCCER"),"oddsAvailable":"true","started":"false","limit":max_events,"includeAltLines":str(bool(cfg.get("include_alt_lines",False))).lower()}
+    params={"apiKey":api_key,"oddsAvailable":"true","limit":max_events}
+    league_id=str(cfg.get("league_id") or "").strip()
+    if league_id: params["leagueID"]=league_id
+    else: params["sportID"]=cfg.get("sport_id","SOCCER")
     async with httpx.AsyncClient(timeout=httpx.Timeout(timeout),follow_redirects=True) as client:
-        response=await client.get(f"{base_url}/events",params=params,headers={"x-api-key":api_key}); response.raise_for_status(); data=response.json()
+        response=await client.get(f"{base_url}/events",params=params)
+        if response.status_code>=400:
+            detail=""
+            try:
+                body=response.json()
+                if isinstance(body,dict): detail=str(body.get("message") or body.get("error") or body.get("detail") or "")
+            except Exception:
+                detail=response.text[:160]
+            detail=" ".join(detail.split())[:180]
+            raise RuntimeError(f"SportsGameOdds HTTP {response.status_code}"+(f": {detail}" if detail else ""))
+        data=response.json()
     quotes=adapt_sportsgameodds_events(data,max_events=max_events)
     if not quotes: raise RuntimeError("SportsGameOdds returned no usable soccer quotes")
     return quotes
@@ -226,7 +239,11 @@ async def fetch_all_feeds(config):
                 break
         except Exception as exc:
             status=getattr(getattr(exc,"response",None),"status_code",None)
-            message=f"{source_name}: {type(exc).__name__}"+(f" HTTP {status}" if status else "")
+            detail=str(exc).strip()
+            if detail.startswith("SportsGameOdds "):
+                message=detail
+            else:
+                message=f"{source_name}: {type(exc).__name__}"+(f" HTTP {status}" if status else "")
             print(f"SCANNER ERROR {message}",flush=True); errors.append(message)
     if not quotes and not errors:
         errors.append("No configured provider currently returned usable odds")
