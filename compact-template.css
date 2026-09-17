@@ -1,0 +1,26 @@
+/* Compact sizing to match the approved reference template */
+.content{padding:0 14px 20px}
+.card{margin:7px 0;border-radius:13px}
+.status{min-height:82px;padding:9px 11px;grid-template-columns:34px 1fr 72px;gap:8px}
+.dot{width:29px;height:29px}
+.status-main{font-size:15px}
+.feed{font-size:11px}
+#quotaLine{font-size:10px}
+.clock{font-size:13px;padding-left:8px}
+.clock .svgico{width:18px!important;height:18px!important}
+.clock small{font-size:8px}
+.quota{gap:8px}
+.metric{min-height:58px;padding:8px 10px;gap:8px}
+.metric .svgico{width:29px;height:29px;flex:0 0 29px}
+.metric strong{font-size:16px}
+.metric span:last-child{font-size:10px}
+.stake{padding:6px 9px;margin-top:8px}
+.stake label{font-size:11px;margin-bottom:3px}
+.stake input{height:36px;border-radius:8px;padding:4px 9px;font-size:17px}
+.sports{gap:7px;margin-top:8px}
+.sport{min-height:59px;padding:6px 2px;border-radius:11px;font-size:10px}
+.sport b{font-size:20px;margin-bottom:2px}
+.scan{margin:9px 0;padding:11px;font-size:17px;border-radius:12px}
+.scan svg{width:23px;height:23px}
+.info{padding:10px}
+@media(max-width:420px){.content{padding:0 12px 18px}.status{min-height:76px;grid-template-columns:30px 1fr 65px}.dot{width:26px;height:26px}.status-main{font-size:14px}.feed{font-size:10px}.metric{min-height:54px;padding:7px 8px}.metric .svgico{width:26px;height:26px;flex-basis:26px}.metric strong{font-size:15px}.stake input{height:34px;font-size:16px}.sport{min-height:55px;font-size:9.5px}.sport b{font-size:19px}.scan{font-size:16px;padding:10px}}
