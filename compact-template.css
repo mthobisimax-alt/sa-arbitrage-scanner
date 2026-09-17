@@ -22,8 +22,9 @@
 .sports{gap:6px;margin-top:6px;grid-template-columns:repeat(4,1fr)}
 .sport{aspect-ratio:1/1;min-height:0;padding:5px 2px 6px;border-radius:10px;font-size:9px;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .sport b{font-size:31px;margin-bottom:5px;line-height:.95;display:block}
-.scan{margin:7px 0;padding:8px;font-size:15px;border-radius:10px}
-.scan svg{width:19px;height:19px}
+/* Large, prominent SCAN NOW control like the reference */
+.scan{margin:8px 0;padding:13px 16px;min-height:58px;font-size:21px;border-radius:12px;gap:13px}
+.scan svg{width:31px;height:31px;flex:0 0 31px}
 .info{padding:6px 8px;grid-template-columns:25px 1fr;gap:7px;margin:6px 0}
 .info .svgico{width:22px;height:22px}
 .info strong{font-size:11px}
@@ -38,4 +39,4 @@
 .summary strong{font-size:14px;line-height:1}
 .summary .muted{display:block;font-size:8.5px;line-height:1.15;margin-top:2px}
 .legal{margin-top:7px;padding:7px;font-size:8.5px}
-@media(max-width:420px){.content{padding:0 12px 14px}.status{min-height:48px;padding:4px 7px;grid-template-columns:22px 1fr 52px}.dot{width:19px;height:19px}.status-main{font-size:11px}.feed{font-size:8.5px}#quotaLine{font-size:7.5px}.clock{font-size:9px}.metric{min-height:35px;padding:3px 6px}.metric .svgico{width:18px;height:18px;flex-basis:18px}.metric strong{font-size:12px}.metric span:last-child{font-size:8px}.stake input{height:29px;font-size:13px}.sport{font-size:8.5px;padding:4px 2px 5px}.sport b{font-size:29px;margin-bottom:4px}.scan{font-size:14px;padding:7px}.info{padding:5px 7px}.info #scanHelp{font-size:9px}.empty{padding:6px 8px}.summary{min-height:48px;margin-top:6px;padding-top:6px}.summary .svgico{width:18px;height:18px}.summary strong{font-size:13px}.summary .muted{font-size:8px}}
+@media(max-width:420px){.content{padding:0 12px 14px}.status{min-height:48px;padding:4px 7px;grid-template-columns:22px 1fr 52px}.dot{width:19px;height:19px}.status-main{font-size:11px}.feed{font-size:8.5px}#quotaLine{font-size:7.5px}.clock{font-size:9px}.metric{min-height:35px;padding:3px 6px}.metric .svgico{width:18px;height:18px;flex-basis:18px}.metric strong{font-size:12px}.metric span:last-child{font-size:8px}.stake input{height:29px;font-size:13px}.sport{font-size:8.5px;padding:4px 2px 5px}.sport b{font-size:29px;margin-bottom:4px}.scan{min-height:55px;font-size:20px;padding:12px 14px}.scan svg{width:29px;height:29px;flex-basis:29px}.info{padding:5px 7px}.info #scanHelp{font-size:9px}.empty{padding:6px 8px}.summary{min-height:48px;margin-top:6px;padding-top:6px}.summary .svgico{width:18px;height:18px}.summary strong{font-size:13px}.summary .muted{font-size:8px}}
