@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from engine import find_arbs, find_preferred_arbs
 from feeds import fetch_all_feeds, fetch_oddspapi_account
+from sgo_feed import fetch_sportsgameodds_fixed
 
 with open("config.json") as f: CFG=json.load(f)
 app=FastAPI(title="SA Arb Scanner Web"); templates=Jinja2Templates(directory=".")
@@ -56,6 +57,12 @@ async def scan():
     opportunities=find_arbs(quotes,age,margin); preferred=find_preferred_arbs(quotes,preferred_bookmakers(),age,margin)
     return quotes,opportunities,preferred,errors
 
+async def scan_fallback_only():
+    quotes,errors=await fetch_sportsgameodds_fixed(CFG)
+    age=CFG.get("max_quote_age_seconds",20); margin=CFG.get("min_margin_percent",0.10)
+    opportunities=find_arbs(quotes,age,margin); preferred=find_preferred_arbs(quotes,preferred_bookmakers(),age,margin)
+    return quotes,opportunities,preferred,errors
+
 async def run_scan_if_allowed():
     global latest
     if scan_lock.locked(): return {"started":False,"reason":"scan_in_progress"}
@@ -70,7 +77,8 @@ async def run_scan_if_allowed():
             return {"started":False,"reason":"quota_exhausted"}
         latest["scan_state"]="fetching"; scan_timeout=max(10,min(45,int(CFG.get("scan_timeout_seconds",35)))); before=quota
         try:
-            quotes,opportunities,sa_opps,errors=await asyncio.wait_for(scan(),timeout=scan_timeout); await asyncio.sleep(1.1); after=await fetch_oddspapi_account(CFG)
+            runner=scan_fallback_only() if odds_exhausted and latest["fallback_available"] else scan()
+            quotes,opportunities,sa_opps,errors=await asyncio.wait_for(runner,timeout=scan_timeout); await asyncio.sleep(1.1); after=await fetch_oddspapi_account(CFG)
             if before.get("available") and after.get("available"):
                 try: after["last_scan_requests"]=max(0,int(after.get("request_count",0))-int(before.get("request_count",0)))
                 except (TypeError,ValueError): after["last_scan_requests"]=None
