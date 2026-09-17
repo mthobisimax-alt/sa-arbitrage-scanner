@@ -62,7 +62,7 @@ def adapt_oddspapi_fixture(data,catalog,max_quotes=12000):
                 try: price=float(player.get("price"))
                 except (TypeError,ValueError): continue
                 if price<=1: continue
-                quotes.append({"bookmaker":str(bookmaker),"bookmaker_url":fixture_url,"bookmaker_host":link_host,"sa_link_status":sa_status,"event_id":fixture_id,"sport":str(sport).lower(),"league":league,"event_name":event_name,"market":meta["name"],"market_id":str(market_id),"market_length":meta["length"],"market_type":meta["type"],"period":meta["period"],"line":meta["line"],"selection":selection,"odds":price,"timestamp":_iso_timestamp(player.get("bookmakerChangedAt") or player.get("changedAt") or fallback_ts)})
+                quotes.append({"source":"OddsPapi","bookmaker":str(bookmaker),"bookmaker_url":fixture_url,"bookmaker_host":link_host,"sa_link_status":sa_status,"event_id":fixture_id,"sport":str(sport).lower(),"league":league,"event_name":event_name,"market":meta["name"],"market_id":str(market_id),"market_length":meta["length"],"market_type":meta["type"],"period":meta["period"],"line":meta["line"],"selection":selection,"odds":price,"timestamp":_iso_timestamp(player.get("bookmakerChangedAt") or player.get("changedAt") or fallback_ts)})
                 if len(quotes)>=max_quotes: return quotes
     return quotes
 
@@ -130,20 +130,104 @@ async def fetch_oddspapi(cfg):
     if not quotes: raise RuntimeError("OddsPapi returned no usable catalog-backed football market quotes")
     return quotes
 
+def _american_to_decimal(value):
+    try: a=float(value)
+    except (TypeError,ValueError): return None
+    if a==0: return None
+    return 1+(a/100.0 if a>0 else 100.0/abs(a))
+
+def _sgo_team_name(event,side):
+    team=((event.get("teams") or {}).get(side) or {})
+    names=team.get("names") or {}
+    return names.get("long") or names.get("medium") or names.get("short") or side.title()
+
+def _sgo_selection(odd,home,away):
+    side=str(odd.get("sideID") or "").lower()
+    if side=="home": return home
+    if side=="away": return away
+    if side in ("draw","tie","x"): return "Draw"
+    if side=="over": return "Over"
+    if side=="under": return "Under"
+    if side=="yes": return "Yes"
+    if side=="no": return "No"
+    return side.title() if side else ""
+
+def adapt_sportsgameodds_events(payload,max_events=12):
+    rows=(payload or {}).get("data") if isinstance(payload,dict) else None
+    if not isinstance(rows,list): return []
+    quotes=[]
+    for event in rows[:max_events]:
+        if not isinstance(event,dict): continue
+        event_id=str(event.get("eventID") or "")
+        if not event_id: continue
+        home=_sgo_team_name(event,"home"); away=_sgo_team_name(event,"away")
+        event_name=f"{home} v {away}"; league=str(event.get("leagueID") or ""); sport=str(event.get("sportID") or "SOCCER").lower()
+        grouped={}
+        for odd_id,odd in (event.get("odds") or {}).items():
+            if not isinstance(odd,dict) or odd.get("ended") is True or odd.get("cancelled") is True: continue
+            market_name=str(odd.get("marketName") or odd_id); period=str(odd.get("periodID") or "game"); bet_type=str(odd.get("betTypeID") or "")
+            line=odd.get("bookOverUnder") if bet_type=="ou" else odd.get("bookSpread") if bet_type=="sp" else ""
+            selection=_sgo_selection(odd,home,away)
+            if not selection: continue
+            key=(market_name,period,bet_type,"" if line is None else str(line))
+            grouped.setdefault(key,[]).append((selection,odd))
+        for (market_name,period,bet_type,line),items in grouped.items():
+            selections={s for s,_ in items}
+            if len(selections) not in (2,3): continue
+            market_id=f"sgo:{market_name}|{period}|{bet_type}|{line}"
+            for selection,odd in items:
+                for bookmaker,book_data in (odd.get("byBookmaker") or {}).items():
+                    if not isinstance(book_data,dict) or book_data.get("available") is False: continue
+                    decimal=_american_to_decimal(book_data.get("odds"))
+                    if not decimal or decimal<=1: continue
+                    url=book_data.get("deeplink") or ""; sa_status,link_host=_sa_link_status(bookmaker,url)
+                    quotes.append({"source":"SportsGameOdds","bookmaker":str(bookmaker),"bookmaker_url":url,"bookmaker_host":link_host,"sa_link_status":sa_status,"event_id":event_id,"sport":sport,"league":league,"event_name":event_name,"market":market_name,"market_id":market_id,"market_length":len(selections),"market_type":bet_type,"period":period,"line":line,"selection":selection,"odds":decimal,"timestamp":_iso_timestamp(book_data.get("lastUpdatedAt"))})
+    return quotes
+
+async def fetch_sportsgameodds(cfg):
+    api_key=_resolve_env(cfg.get("api_key","env:SPORTSGAMEODDS_API_KEY"))
+    if not api_key:
+        if cfg.get("optional",False): return []
+        raise RuntimeError("SPORTSGAMEODDS_API_KEY is not configured")
+    base_url=cfg.get("base_url","https://api.sportsgameodds.com/v2").rstrip("/"); timeout=min(20.0,max(5.0,float(cfg.get("timeout_seconds",15)))); max_events=max(1,min(100,int(cfg.get("max_events",12))))
+    params={"sportID":cfg.get("sport_id","SOCCER"),"oddsAvailable":"true","started":"false","limit":max_events,"includeAltLines":str(bool(cfg.get("include_alt_lines",False))).lower()}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout),follow_redirects=True) as client:
+        response=await client.get(f"{base_url}/events",params=params,headers={"x-api-key":api_key}); response.raise_for_status(); data=response.json()
+    quotes=adapt_sportsgameodds_events(data,max_events=max_events)
+    if not quotes: raise RuntimeError("SportsGameOdds returned no usable soccer quotes")
+    return quotes
+
 async def fetch_provider(cfg):
     provider=cfg.get("name") or "Unknown provider"; adapter=cfg.get("adapter","oddspapi_v4")
     if adapter=="oddspapi_v4": return await fetch_oddspapi(cfg)
+    if adapter=="sportsgameodds_v2": return await fetch_sportsgameodds(cfg)
     raise RuntimeError(f"Unsupported feed adapter '{adapter}' for {provider}")
 
 async def fetch_all_feeds(config):
-    quotes,errors=[],[]; sources=config.get("providers",[])
+    quotes,errors=[],[]
+    sources=sorted([cfg for cfg in config.get("providers",[]) if cfg.get("enabled",False)],key=lambda x:int(x.get("priority",100)))
+    strategy=str(config.get("provider_strategy","all")).lower(); min_quotes=max(1,int(config.get("min_quotes_to_stop",20)))
+    if not sources:
+        return [],["No live odds provider is enabled"]
     for cfg in sources:
-        if not cfg.get("enabled",False): continue
         source_name=cfg.get("name") or "Unknown provider"
-        try: quotes.extend(await fetch_provider(cfg))
+        if cfg.get("optional",False) and not _resolve_env(cfg.get("api_key","")):
+            continue
+        if strategy=="quota_aware_fallback" and cfg.get("adapter")=="oddspapi_v4":
+            quota=await fetch_oddspapi_account(config)
+            if quota.get("available") and int(quota.get("requests_remaining") or 0)<=0:
+                print("SCANNER OddsPapi skipped because quota is exhausted; trying fallback provider",flush=True)
+                continue
+        try:
+            provider_quotes=await fetch_provider(cfg)
+            quotes.extend(provider_quotes)
+            print(f"SCANNER source={source_name} quotes={len(provider_quotes)} strategy={strategy}",flush=True)
+            if strategy=="quota_aware_fallback" and len(provider_quotes)>=min_quotes:
+                break
         except Exception as exc:
             status=getattr(getattr(exc,"response",None),"status_code",None)
             message=f"{source_name}: {type(exc).__name__}"+(f" HTTP {status}" if status else "")
             print(f"SCANNER ERROR {message}",flush=True); errors.append(message)
-    if not any(cfg.get("enabled",False) for cfg in sources): errors.append("No live odds provider is enabled")
+    if not quotes and not errors:
+        errors.append("No configured provider currently returned usable odds")
     return quotes,errors
