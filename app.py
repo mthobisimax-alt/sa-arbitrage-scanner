@@ -1,3 +1,4 @@
+import os
 import json
 import asyncio
 from datetime import datetime, timezone
@@ -21,6 +22,15 @@ def preferred_bookmakers():
 
 def feed_names(): return [p.get("name","Unknown provider") for p in CFG.get("providers",[]) if p.get("enabled",False)]
 
+def fallback_available():
+    for p in CFG.get("providers",[]):
+        if not p.get("enabled",False) or int(p.get("priority",99))<=1: continue
+        key_ref=str(p.get("api_key") or "")
+        if key_ref.startswith("env:"):
+            if os.getenv(key_ref[4:].strip(),"").strip(): return True
+        elif key_ref.strip(): return True
+    return False
+
 def detected_preferred_bookmakers(quotes):
     live={str(q.get("bookmaker")).strip().lower():str(q.get("bookmaker")).strip() for q in quotes if q.get("bookmaker")}
     return [live[p.lower()] for p in preferred_bookmakers() if p.lower() in live]
@@ -31,7 +41,7 @@ def seconds_since_update():
     try: return max(0,(datetime.now(timezone.utc)-datetime.fromisoformat(value.replace("Z","+00:00"))).total_seconds())
     except Exception: return None
 
-latest={"quotes":[],"opportunities":[],"preferred_opportunities":[],"preferred_opportunity_count":0,"updated_at":None,"errors":[],"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":[],"scan_state":"idle","quota":{"available":False},"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS}
+latest={"quotes":[],"opportunities":[],"preferred_opportunities":[],"preferred_opportunity_count":0,"updated_at":None,"errors":[],"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":[],"scan_state":"idle","quota":{"available":False},"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS,"fallback_available":fallback_available()}
 
 async def scan():
     quotes=[]; errors=[]
@@ -53,9 +63,10 @@ async def run_scan_if_allowed():
     if age is not None and age<MIN_SCAN_INTERVAL_SECONDS and latest.get("scan_state") in ("ok","completed_with_errors"):
         return {"started":False,"reason":"cached","retry_after_seconds":int(MIN_SCAN_INTERVAL_SECONDS-age)}
     async with scan_lock:
-        quota=await fetch_oddspapi_account(CFG); latest["quota"]=quota
-        if quota.get("available") and int(quota.get("requests_remaining") or 0)<=0:
-            latest["scan_state"]="paused_quota"; latest["errors"]=["OddsPapi quota exhausted. Full odds scanning is paused until quota resets."]
+        quota=await fetch_oddspapi_account(CFG); latest["quota"]=quota; latest["fallback_available"]=fallback_available()
+        odds_exhausted=bool(quota.get("available") and int(quota.get("requests_remaining") or 0)<=0)
+        if odds_exhausted and not latest["fallback_available"]:
+            latest["scan_state"]="paused_quota"; latest["errors"]=["OddsPapi quota exhausted and no fallback provider is configured."]
             return {"started":False,"reason":"quota_exhausted"}
         latest["scan_state"]="fetching"; scan_timeout=max(10,min(45,int(CFG.get("scan_timeout_seconds",35)))); before=quota
         try:
@@ -63,7 +74,7 @@ async def run_scan_if_allowed():
             if before.get("available") and after.get("available"):
                 try: after["last_scan_requests"]=max(0,int(after.get("request_count",0))-int(before.get("request_count",0)))
                 except (TypeError,ValueError): after["last_scan_requests"]=None
-            latest={"quotes":quotes,"opportunities":opportunities,"preferred_opportunities":sa_opps,"preferred_opportunity_count":len(sa_opps),"updated_at":datetime.now(timezone.utc).isoformat(),"errors":errors,"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":detected_preferred_bookmakers(quotes),"scan_state":"ok" if not errors else "completed_with_errors","quota":after,"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS}
+            latest={"quotes":quotes,"opportunities":opportunities,"preferred_opportunities":sa_opps,"preferred_opportunity_count":len(sa_opps),"updated_at":datetime.now(timezone.utc).isoformat(),"errors":errors,"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":detected_preferred_bookmakers(quotes),"scan_state":"ok" if not errors else "completed_with_errors","quota":after,"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS,"fallback_available":fallback_available()}
             return {"started":True,"reason":"completed"}
         except asyncio.TimeoutError:
             latest["scan_state"]="timeout"; latest["errors"]=[f"Scanner cycle timed out after {scan_timeout} seconds"]; return {"started":True,"reason":"timeout"}
@@ -74,7 +85,7 @@ async def run_scan_if_allowed():
 def home(request:Request):
     with open("index.html",encoding="utf-8") as f: html=f.read()
     html=html.replace("</head>",'<link rel="stylesheet" href="/compact-template.css?v=1"></head>')
-    html=html.replace("</body>",'<script src="/status-fix.js?v=1"></script></body>')
+    html=html.replace("</body>",'<script src="/status-fix.js?v=2"></script></body>')
     return HTMLResponse(html,headers={"Cache-Control":"no-store"})
 @app.get("/hero-template.webp")
 def hero_template(): return FileResponse("hero-template.webp",media_type="image/webp",headers={"Cache-Control":"public, max-age=3600"})
@@ -83,7 +94,9 @@ def compact_template(): return FileResponse("compact-template.css",media_type="t
 @app.get("/status-fix.js")
 def status_fix(): return FileResponse("status-fix.js",media_type="application/javascript",headers={"Cache-Control":"no-store"})
 @app.get("/api/status")
-def status(): return JSONResponse(latest)
+def status():
+    latest["fallback_available"]=fallback_available()
+    return JSONResponse(latest)
 @app.post("/api/scan")
 async def request_scan(): return JSONResponse(await run_scan_if_allowed())
 @app.get("/api/quota")
@@ -94,14 +107,14 @@ def sa_opportunities(): return {"preferred_bookmakers":latest["preferred_bookmak
 def bookmakers():
     names=sorted({q.get("bookmaker") for q in latest["quotes"] if q.get("bookmaker")}); return {"live":names,"preferred_present":detected_preferred_bookmakers(latest["quotes"]),"preferred_configured":preferred_bookmakers()}
 @app.get("/api/health")
-def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand"}
+def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
 
 @app.on_event("startup")
 async def startup():
     global latest
-    latest["quota"]=await fetch_oddspapi_account(CFG)
-    if latest["quota"].get("available") and int(latest["quota"].get("requests_remaining") or 0)<=0: latest["scan_state"]="paused_quota"
-    else: latest["scan_state"]="idle"
+    latest["quota"]=await fetch_oddspapi_account(CFG); latest["fallback_available"]=fallback_available()
+    odds_exhausted=bool(latest["quota"].get("available") and int(latest["quota"].get("requests_remaining") or 0)<=0)
+    latest["scan_state"]="paused_quota" if odds_exhausted and not latest["fallback_available"] else "idle"
 
 if __name__=="__main__":
     import uvicorn; uvicorn.run(app,host="0.0.0.0",port=8787)
