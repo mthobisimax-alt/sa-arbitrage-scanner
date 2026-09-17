@@ -2,7 +2,7 @@ import json
 import asyncio
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from engine import find_arbs, find_preferred_arbs
 from feeds import fetch_all_feeds, fetch_oddspapi_account
@@ -53,32 +53,27 @@ async def run_scan_if_allowed():
     if age is not None and age<MIN_SCAN_INTERVAL_SECONDS and latest.get("scan_state") in ("ok","completed_with_errors"):
         return {"started":False,"reason":"cached","retry_after_seconds":int(MIN_SCAN_INTERVAL_SECONDS-age)}
     async with scan_lock:
-        quota=await fetch_oddspapi_account(CFG)
-        latest["quota"]=quota
+        quota=await fetch_oddspapi_account(CFG); latest["quota"]=quota
         if quota.get("available") and int(quota.get("requests_remaining") or 0)<=0:
             latest["scan_state"]="paused_quota"; latest["errors"]=["OddsPapi quota exhausted. Full odds scanning is paused until quota resets."]
             return {"started":False,"reason":"quota_exhausted"}
-        latest["scan_state"]="fetching"
-        scan_timeout=max(10,min(45,int(CFG.get("scan_timeout_seconds",35))))
-        before=quota
+        latest["scan_state"]="fetching"; scan_timeout=max(10,min(45,int(CFG.get("scan_timeout_seconds",35)))); before=quota
         try:
-            quotes,opportunities,sa_opps,errors=await asyncio.wait_for(scan(),timeout=scan_timeout)
-            await asyncio.sleep(1.1)
-            after=await fetch_oddspapi_account(CFG)
+            quotes,opportunities,sa_opps,errors=await asyncio.wait_for(scan(),timeout=scan_timeout); await asyncio.sleep(1.1); after=await fetch_oddspapi_account(CFG)
             if before.get("available") and after.get("available"):
                 try: after["last_scan_requests"]=max(0,int(after.get("request_count",0))-int(before.get("request_count",0)))
                 except (TypeError,ValueError): after["last_scan_requests"]=None
             latest={"quotes":quotes,"opportunities":opportunities,"preferred_opportunities":sa_opps,"preferred_opportunity_count":len(sa_opps),"updated_at":datetime.now(timezone.utc).isoformat(),"errors":errors,"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":detected_preferred_bookmakers(quotes),"scan_state":"ok" if not errors else "completed_with_errors","quota":after,"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS}
             return {"started":True,"reason":"completed"}
         except asyncio.TimeoutError:
-            latest["scan_state"]="timeout"; latest["errors"]=[f"Scanner cycle timed out after {scan_timeout} seconds"]
-            return {"started":True,"reason":"timeout"}
+            latest["scan_state"]="timeout"; latest["errors"]=[f"Scanner cycle timed out after {scan_timeout} seconds"]; return {"started":True,"reason":"timeout"}
         except Exception as exc:
-            latest["scan_state"]="error"; latest["errors"]=[f"Scanner cycle failed: {type(exc).__name__}: {exc}"]
-            return {"started":True,"reason":"error"}
+            latest["scan_state"]="error"; latest["errors"]=[f"Scanner cycle failed: {type(exc).__name__}: {exc}"]; return {"started":True,"reason":"error"}
 
 @app.get("/",response_class=HTMLResponse)
 def home(request:Request): return templates.TemplateResponse(request=request,name="index.html")
+@app.get("/hero-template.webp")
+def hero_template(): return FileResponse("hero-template.webp",media_type="image/webp",headers={"Cache-Control":"public, max-age=3600"})
 @app.get("/api/status")
 def status(): return JSONResponse(latest)
 @app.post("/api/scan")
