@@ -4,10 +4,13 @@
   "min_margin_percent": 0.10,
   "scan_timeout_seconds": 45,
   "demo_mode": false,
+  "provider_strategy": "quota_aware_fallback",
+  "min_quotes_to_stop": 20,
 
   "providers": [
     {
       "enabled": true,
+      "priority": 1,
       "name": "OddsPapi",
       "adapter": "oddspapi_v4",
       "api_key": "env:ODDSPAPI_API_KEY",
@@ -25,6 +28,26 @@
         "Sportingbet"
       ],
       "timeout_seconds": 20
+    },
+    {
+      "enabled": true,
+      "optional": true,
+      "priority": 2,
+      "name": "SportsGameOdds",
+      "adapter": "sportsgameodds_v2",
+      "api_key": "env:SPORTSGAMEODDS_API_KEY",
+      "base_url": "https://api.sportsgameodds.com/v2",
+      "sport_id": "SOCCER",
+      "max_events": 12,
+      "include_alt_lines": false,
+      "timeout_seconds": 15,
+      "preferred_bookmakers": [
+        "Hollywoodbets",
+        "Betway",
+        "Betway ZA",
+        "Supabets",
+        "Sportingbet"
+      ]
     }
   ]
 }
