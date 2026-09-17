@@ -1,26 +1,39 @@
-/* Extra-compact sizing to match the approved reference template */
-.content{padding:0 14px 20px}
-.card{margin:6px 0;border-radius:12px}
-.status{min-height:64px;padding:6px 9px;grid-template-columns:28px 1fr 62px;gap:7px}
-.dot{width:24px;height:24px}
-.status-main{font-size:13px}
-.feed{font-size:10px}
-#quotaLine{font-size:9px}
-.clock{font-size:11px;padding-left:7px}
-.clock .svgico{width:15px!important;height:15px!important}
+/* Compact sizing matched to the approved right-hand reference */
+.content{padding:0 14px 16px}
+.card{margin:5px 0;border-radius:11px}
+.status{min-height:52px;padding:4px 8px;grid-template-columns:24px 1fr 56px;gap:6px}
+.dot{width:20px;height:20px}
+.status-main{font-size:12px}
+.feed{font-size:9px;margin-top:1px}
+#quotaLine{font-size:8px}
+.clock{font-size:10px;padding-left:6px}
+.clock .svgico{width:14px!important;height:14px!important}
 .clock small{font-size:7px}
-.quota{gap:7px}
-.metric{min-height:44px;padding:5px 8px;gap:7px}
-.metric .svgico{width:23px;height:23px;flex:0 0 23px}
-.metric strong{font-size:14px}
-.metric span:last-child{font-size:9px}
-.stake{padding:5px 8px;margin-top:7px}
-.stake label{font-size:10px;margin-bottom:2px}
-.stake input{height:30px;border-radius:7px;padding:3px 8px;font-size:15px}
-.sports{gap:6px;margin-top:7px}
-.sport{min-height:48px;padding:4px 2px;border-radius:10px;font-size:9px}
-.sport b{font-size:17px;margin-bottom:1px}
-.scan{margin:8px 0;padding:9px;font-size:16px;border-radius:11px}
-.scan svg{width:21px;height:21px}
-.info{padding:9px}
-@media(max-width:420px){.content{padding:0 12px 18px}.status{min-height:58px;padding:5px 8px;grid-template-columns:25px 1fr 57px}.dot{width:22px;height:22px}.status-main{font-size:12px}.feed{font-size:9px}#quotaLine{font-size:8px}.clock{font-size:10px}.metric{min-height:40px;padding:4px 7px}.metric .svgico{width:21px;height:21px;flex-basis:21px}.metric strong{font-size:13px}.metric span:last-child{font-size:8.5px}.stake{padding:4px 7px}.stake input{height:28px;font-size:14px}.sport{min-height:44px;font-size:8.5px}.sport b{font-size:16px}.scan{font-size:15px;padding:8px}}
+.quota{gap:6px}
+.metric{min-height:38px;padding:4px 7px;gap:6px}
+.metric .svgico{width:20px;height:20px;flex:0 0 20px}
+.metric strong{font-size:13px}
+.metric span:last-child{font-size:8.5px}
+.stake{padding:4px 7px;margin-top:6px}
+.stake label{font-size:9.5px;margin-bottom:1px}
+.stake input{height:27px;border-radius:7px;padding:2px 7px;font-size:14px}
+.sports{gap:5px;margin-top:6px}
+.sport{min-height:42px;padding:3px 2px;border-radius:9px;font-size:8.5px}
+.sport b{font-size:15px;margin-bottom:0}
+.scan{margin:7px 0;padding:8px;font-size:15px;border-radius:10px}
+.scan svg{width:19px;height:19px}
+.info{padding:6px 8px;grid-template-columns:25px 1fr;gap:7px;margin:6px 0}
+.info .svgico{width:22px;height:22px}
+.info strong{font-size:11px}
+.info #scanHelp{font-size:9.5px;line-height:1.2}
+.empty{padding:7px 9px;grid-template-columns:31px 1fr;gap:7px;margin:6px 0}
+.empty .svgico{width:27px;height:27px}
+.empty b{font-size:11px}
+.empty .muted{font-size:9px}
+.summary{margin-top:7px;padding-top:7px;min-height:52px;align-items:center}
+.summary>div{padding:0 4px}
+.summary .svgico{width:20px;height:20px;margin:auto auto 1px}
+.summary strong{font-size:14px;line-height:1}
+.summary .muted{display:block;font-size:8.5px;line-height:1.15;margin-top:2px}
+.legal{margin-top:7px;padding:7px;font-size:8.5px}
+@media(max-width:420px){.content{padding:0 12px 14px}.status{min-height:48px;padding:4px 7px;grid-template-columns:22px 1fr 52px}.dot{width:19px;height:19px}.status-main{font-size:11px}.feed{font-size:8.5px}#quotaLine{font-size:7.5px}.clock{font-size:9px}.metric{min-height:35px;padding:3px 6px}.metric .svgico{width:18px;height:18px;flex-basis:18px}.metric strong{font-size:12px}.metric span:last-child{font-size:8px}.stake{padding:3px 6px}.stake input{height:25px;font-size:13px}.sport{min-height:39px;font-size:8px}.sport b{font-size:14px}.scan{font-size:14px;padding:7px}.info{padding:5px 7px}.info #scanHelp{font-size:9px}.empty{padding:6px 8px}.summary{min-height:48px;margin-top:6px;padding-top:6px}.summary .svgico{width:18px;height:18px}.summary strong{font-size:13px}.summary .muted{font-size:8px}}
