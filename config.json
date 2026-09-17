@@ -37,7 +37,7 @@
       "adapter": "sportsgameodds_v2",
       "api_key": "env:SPORTSGAMEODDS_API_KEY",
       "base_url": "https://api.sportsgameodds.com/v2",
-      "sport_id": "SOCCER",
+      "league_id": "UEFA_CHAMPIONS_LEAGUE,MLS",
       "max_events": 12,
       "include_alt_lines": false,
       "timeout_seconds": 15,
