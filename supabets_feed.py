@@ -92,20 +92,62 @@ def parse_event_odds(xml_text, bookmaker="Supabets"):
 async def probe_supabets(cfg):
     base=str(cfg.get("base_url") or "https://mobile.supabets.co.za/Controls/MarketWS.asmx").rstrip("/")
     timeout=max(5.0,min(20.0,float(cfg.get("timeout_seconds",12))))
-    result={"provider":"Supabets Direct","reachable":False,"operations":[],"events":[],"quotes":[],"errors":[]}
+    result={
+        "provider":"Supabets Direct",
+        "reachable":False,
+        "operations":[],
+        "operation_parameters":{},
+        "events":[],
+        "quotes":[],
+        "errors":[]
+    }
+    known={
+        "getClientActiveEventsByGroup":["IDPalinsesto","IDGruppo","TipoVisualizzazioneQuote","IDLingua"],
+        "getClientOddsBySubeEvent":["IDPalinsesto","IDSottoEvento","IDLingua","IDGmt"],
+        "GetListOdds_OddLessThan":["strQuotaMax","strIDSport","typeOrder","tipoVisQuote"]
+    }
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout),follow_redirects=True) as client:
             landing=await client.get(base)
             landing.raise_for_status()
             result["reachable"]=True
-            text=landing.text
-            for name in ("getClientActiveEventsByGroup","getClientOddsBySubeEvent","GetListOdds_OddLessThan"):
-                if name.lower() in text.lower():
-                    result["operations"].append(name)
+
+            discovered=set()
+            for name in known:
+                if name.lower() in landing.text.lower():
+                    discovered.add(name)
+
+            try:
+                wsdl=await client.get(base+"?WSDL")
+                if wsdl.status_code<400 and wsdl.text.strip():
+                    root=ET.fromstring(wsdl.text)
+                    for el in root.iter():
+                        if _local(el.tag)=="operation":
+                            name=str(el.attrib.get("name") or "").strip()
+                            if name:
+                                discovered.add(name)
+            except Exception as exc:
+                result["errors"].append(f"WSDL inspection failed: {type(exc).__name__}")
+
+            for name in known:
+                help_page=await client.get(base,params={"op":name})
+                if help_page.status_code<400 and name.lower() in help_page.text.lower():
+                    discovered.add(name)
+
+            result["operations"]=sorted(discovered)
+            for name,params in known.items():
+                if name in discovered:
+                    result["operation_parameters"][name]=params
 
             group_id=str(cfg.get("group_id") or "").strip()
             if cfg.get("probe_active_events",False) and group_id:
-                r=await client.get(base+"/getClientActiveEventsByGroup",params={"groupID":group_id})
+                params={
+                    "IDPalinsesto":str(cfg.get("schedule_id") or "0"),
+                    "IDGruppo":group_id,
+                    "TipoVisualizzazioneQuote":str(cfg.get("odds_view_type") or "0"),
+                    "IDLingua":str(cfg.get("language_id") or "1")
+                }
+                r=await client.get(base+"/getClientActiveEventsByGroup",params=params)
                 if r.status_code<400:
                     try:
                         result["events"]=parse_active_events(r.text)
