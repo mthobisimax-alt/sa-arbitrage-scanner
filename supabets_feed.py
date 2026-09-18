@@ -337,7 +337,7 @@ async def probe_supabets_bundle_context():
         "provider":"Supabets New Site",
         "reachable":False,
         "scripts_scanned":0,
-        "exact_matches":[],
+        "sport_api_matches":[],
         "candidate_origins":[],
         "errors":[]
     }
@@ -359,7 +359,7 @@ async def probe_supabets_bundle_context():
                 if src not in scripts:
                     scripts.append(src)
 
-            exact_tokens=("EventsProgram/sports-full","/api/b2c/","apib2c","sports-full")
+            tokens=("sportB2CApi","EventsProgram/sports-full","/api/b2c/")
             origins=set()
             found=[]
             for src in scripts[:40]:
@@ -372,20 +372,20 @@ async def probe_supabets_bundle_context():
                         continue
                     result["scripts_scanned"]+=1
                     lower=text.lower()
-                    for token in exact_tokens:
+                    for token in tokens:
                         needle=token.lower()
                         pos=0
                         hits=0
-                        while hits<8:
+                        while hits<12:
                             idx=lower.find(needle,pos)
                             if idx<0:
                                 break
-                            a=max(0,idx-350); b=min(len(text),idx+len(token)+650)
+                            a=max(0,idx-900); b=min(len(text),idx+len(token)+1400)
                             snippet=" ".join(text[a:b].replace("\r"," ").replace("\n"," ").split())
                             found.append({
                                 "token":token,
                                 "script":src.rsplit("/",1)[-1],
-                                "context":snippet[:1000]
+                                "context":snippet[:2200]
                             })
                             for origin in re.findall(r'https?://[A-Za-z0-9._:-]+',snippet):
                                 origins.add(origin)
@@ -394,7 +394,7 @@ async def probe_supabets_bundle_context():
                 except Exception:
                     continue
 
-            result["exact_matches"]=found[:40]
+            result["sport_api_matches"]=found[:50]
             result["candidate_origins"]=sorted(origins)[:30]
     except Exception as exc:
         result["errors"].append(f"Bundle context probe failed: {type(exc).__name__}")
