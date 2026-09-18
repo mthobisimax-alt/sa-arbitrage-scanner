@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from engine import find_arbs, find_preferred_arbs, find_near_arbs, market_diagnostics
 from feeds import fetch_all_feeds, fetch_oddspapi_account
 from sgo_feed import fetch_sportsgameodds_fixed
+from supabets_feed import probe_supabets
 
 with open("config.json") as f: CFG=json.load(f)
 app=FastAPI(title="SA Arb Scanner Web"); templates=Jinja2Templates(directory=".")
@@ -22,6 +23,10 @@ def preferred_bookmakers():
     return names
 
 def feed_names(): return [p.get("name","Unknown provider") for p in CFG.get("providers",[]) if p.get("enabled",False)]
+
+def supabets_cfg():
+    return next((p for p in CFG.get("providers",[]) if p.get("adapter")=="supabets_marketws"),None)
+
 
 def fallback_available():
     for p in CFG.get("providers",[]):
@@ -117,6 +122,19 @@ def sa_opportunities(): return {"preferred_bookmakers":latest["preferred_bookmak
 @app.get("/api/bookmakers")
 def bookmakers():
     names=sorted({q.get("bookmaker") for q in latest["quotes"] if q.get("bookmaker")}); return {"live":names,"preferred_present":detected_preferred_bookmakers(latest["quotes"]),"preferred_configured":preferred_bookmakers()}
+@app.get("/api/supabets-test")
+async def supabets_test():
+    cfg=supabets_cfg()
+    if not cfg:
+        return JSONResponse({"provider":"Supabets Direct","configured":False,"errors":["Supabets provider is not configured"]})
+    result=await probe_supabets(cfg)
+    result["configured"]=True
+    result["enabled_for_scanner"]=bool(cfg.get("enabled",False))
+    result["diagnostic_only"]=bool(cfg.get("diagnostic_only",True))
+    result["event_count"]=len(result.get("events") or [])
+    result["quote_count"]=len(result.get("quotes") or [])
+    return JSONResponse(result)
+
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
 
