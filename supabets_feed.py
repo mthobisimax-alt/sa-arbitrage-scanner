@@ -204,6 +204,7 @@ async def probe_supabets_new_site():
         "candidate_data_urls":[],
         "candidate_paths":[],
         "candidate_hosts":[],
+        "sports_full_probe":{},
         "errors":[]
     }
     try:
@@ -292,6 +293,39 @@ async def probe_supabets_new_site():
             result["candidate_data_urls"]=sorted(absolute)[:60]
             result["candidate_paths"]=sorted(paths)[:80]
             result["candidate_hosts"]=sorted(hosts)[:30]
+
+            sports_url=urljoin(base,"/api/b2c/EventsProgram/sports-full")
+            try:
+                sr=await client.get(sports_url)
+                probe={
+                    "url":sports_url,
+                    "status":sr.status_code,
+                    "content_type":str(sr.headers.get("content-type") or ""),
+                    "final_url":str(sr.url)
+                }
+                body=(sr.text or "").strip()
+                if "json" in probe["content_type"].lower() or (body.startswith("{") or body.startswith("[")):
+                    try:
+                        data=sr.json()
+                        probe["json_type"]=type(data).__name__
+                        if isinstance(data,dict):
+                            probe["top_level_keys"]=list(data.keys())[:30]
+                            for key in ("data","sports","events","result","items"):
+                                value=data.get(key)
+                                if isinstance(value,list):
+                                    probe["item_count"]=len(value)
+                                    probe["sample_keys"]=list(value[0].keys())[:30] if value and isinstance(value[0],dict) else []
+                                    break
+                        elif isinstance(data,list):
+                            probe["item_count"]=len(data)
+                            probe["sample_keys"]=list(data[0].keys())[:30] if data and isinstance(data[0],dict) else []
+                    except Exception as exc:
+                        probe["json_parse_error"]=type(exc).__name__
+                else:
+                    probe["preview"]=" ".join(body.replace("\r"," ").replace("\n"," ").split())[:220]
+                result["sports_full_probe"]=probe
+            except Exception as exc:
+                result["sports_full_probe"]={"url":sports_url,"error":type(exc).__name__}
     except Exception as exc:
         result["errors"].append(f"New-site public page probe failed: {type(exc).__name__}")
     return result
