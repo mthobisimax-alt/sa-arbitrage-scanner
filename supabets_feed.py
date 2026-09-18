@@ -337,7 +337,7 @@ async def probe_supabets_bundle_context():
         "provider":"Supabets New Site",
         "reachable":False,
         "scripts_scanned":0,
-        "matches":[],
+        "exact_matches":[],
         "candidate_origins":[],
         "errors":[]
     }
@@ -359,41 +359,42 @@ async def probe_supabets_bundle_context():
                 if src not in scripts:
                     scripts.append(src)
 
-            tokens=("EventsProgram/sports-full","apib2c","api.","baseURL","baseUrl","NEXT_PUBLIC","sports-full")
+            exact_tokens=("EventsProgram/sports-full","/api/b2c/","apib2c","sports-full")
             origins=set()
-            matches=[]
-            for src in scripts[:35]:
+            found=[]
+            for src in scripts[:40]:
                 try:
                     js=await client.get(src)
                     if js.status_code>=400:
                         continue
                     text=js.text or ""
-                    if len(text)>3_000_000:
+                    if len(text)>3_500_000:
                         continue
                     result["scripts_scanned"]+=1
                     lower=text.lower()
-                    for token in tokens:
-                        start=0
+                    for token in exact_tokens:
                         needle=token.lower()
-                        while True:
-                            idx=lower.find(needle,start)
+                        pos=0
+                        hits=0
+                        while hits<8:
+                            idx=lower.find(needle,pos)
                             if idx<0:
                                 break
-                            a=max(0,idx-180); b=min(len(text),idx+len(token)+260)
+                            a=max(0,idx-350); b=min(len(text),idx+len(token)+650)
                             snippet=" ".join(text[a:b].replace("\r"," ").replace("\n"," ").split())
-                            matches.append({"token":token,"script":src.rsplit("/",1)[-1],"context":snippet[:650]})
+                            found.append({
+                                "token":token,
+                                "script":src.rsplit("/",1)[-1],
+                                "context":snippet[:1000]
+                            })
                             for origin in re.findall(r'https?://[A-Za-z0-9._:-]+',snippet):
                                 origins.add(origin)
-                            start=idx+len(token)
-                            if len(matches)>=40:
-                                break
-                        if len(matches)>=40:
-                            break
-                    if len(matches)>=40:
-                        break
+                            pos=idx+len(token)
+                            hits+=1
                 except Exception:
                     continue
-            result["matches"]=matches[:40]
+
+            result["exact_matches"]=found[:40]
             result["candidate_origins"]=sorted(origins)[:30]
     except Exception as exc:
         result["errors"].append(f"Bundle context probe failed: {type(exc).__name__}")
