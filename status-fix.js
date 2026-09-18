@@ -41,6 +41,10 @@
       expected.forEach(name=>lines.push(`<b style="color:#7dd3fc">${name}</b>: 0 accepted quotes`));
     }
 
+    const md=(data&&data.market_diagnostics)||{};
+    if(Number.isFinite(Number(md.markets_checked))){
+      lines.push(`<span style="color:#cbd5e1"><b>Markets checked:</b> ${Number(md.markets_checked)||0} • <b>complete same-line:</b> ${Number(md.complete_same_line_markets)||0} • <b>arbs found:</b> ${Number(md.arbs_found)||0}</span>`);
+    }
     if(errors.length){
       lines.push(`<span style="color:#fbbf24"><b>Diagnostic:</b> ${errors.map(e=>String(e)).join(' • ')}</span>`);
     }else if(lines.length){
