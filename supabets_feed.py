@@ -329,3 +329,72 @@ async def probe_supabets_new_site():
     except Exception as exc:
         result["errors"].append(f"New-site public page probe failed: {type(exc).__name__}")
     return result
+
+
+async def probe_supabets_bundle_context():
+    base="https://new.supabets.co.za/"
+    result={
+        "provider":"Supabets New Site",
+        "reachable":False,
+        "scripts_scanned":0,
+        "matches":[],
+        "candidate_origins":[],
+        "errors":[]
+    }
+    try:
+        import re
+        from urllib.parse import urljoin
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"}
+        ) as client:
+            r=await client.get(base)
+            r.raise_for_status()
+            result["reachable"]=True
+            html=r.text or ""
+            scripts=[]
+            for m in re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I):
+                src=urljoin(base,m)
+                if src not in scripts:
+                    scripts.append(src)
+
+            tokens=("EventsProgram/sports-full","apib2c","api.","baseURL","baseUrl","NEXT_PUBLIC","sports-full")
+            origins=set()
+            matches=[]
+            for src in scripts[:35]:
+                try:
+                    js=await client.get(src)
+                    if js.status_code>=400:
+                        continue
+                    text=js.text or ""
+                    if len(text)>3_000_000:
+                        continue
+                    result["scripts_scanned"]+=1
+                    lower=text.lower()
+                    for token in tokens:
+                        start=0
+                        needle=token.lower()
+                        while True:
+                            idx=lower.find(needle,start)
+                            if idx<0:
+                                break
+                            a=max(0,idx-180); b=min(len(text),idx+len(token)+260)
+                            snippet=" ".join(text[a:b].replace("\r"," ").replace("\n"," ").split())
+                            matches.append({"token":token,"script":src.rsplit("/",1)[-1],"context":snippet[:650]})
+                            for origin in re.findall(r'https?://[A-Za-z0-9._:-]+',snippet):
+                                origins.add(origin)
+                            start=idx+len(token)
+                            if len(matches)>=40:
+                                break
+                        if len(matches)>=40:
+                            break
+                    if len(matches)>=40:
+                        break
+                except Exception:
+                    continue
+            result["matches"]=matches[:40]
+            result["candidate_origins"]=sorted(origins)[:30]
+    except Exception as exc:
+        result["errors"].append(f"Bundle context probe failed: {type(exc).__name__}")
+    return result
