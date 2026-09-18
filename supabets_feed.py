@@ -197,59 +197,101 @@ async def probe_supabets_new_site():
         "reachable":False,
         "status":None,
         "content_type":"",
-        "script_sources":[],
-        "candidate_data_urls":[],
+        "framework":"",
+        "script_count":0,
+        "scripts_scanned":0,
         "embedded_markers":[],
+        "candidate_data_urls":[],
+        "candidate_paths":[],
+        "candidate_hosts":[],
         "errors":[]
     }
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0),follow_redirects=True,headers={"User-Agent":"Mozilla/5.0"}) as client:
+        import re
+        from urllib.parse import urljoin, urlparse
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"}
+        ) as client:
             r=await client.get(base)
             result["status"]=r.status_code
             result["content_type"]=str(r.headers.get("content-type") or "")
             r.raise_for_status()
             result["reachable"]=True
             html=r.text or ""
-            import re
+
+            if "/_next/" in html:
+                result["framework"]="Next.js"
+            elif "__NUXT__" in html:
+                result["framework"]="Nuxt"
+
             scripts=[]
             for m in re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I):
-                if m.startswith("//"): m="https:"+m
-                elif m.startswith("/"): m=base.rstrip("/")+m
-                elif not m.startswith("http"): m=base+m.lstrip("/")
-                if m not in scripts: scripts.append(m)
-            result["script_sources"]=scripts[:30]
-
-            candidates=set()
-            patterns=[
-                r'https?://[^"\'\s<>]+',
-                r'["\']([^"\']*(?:api|graphql|odds|sportsbook|event|market)[^"\']*)["\']'
-            ]
-            for pat in patterns:
-                for match in re.findall(pat,html,re.I):
-                    val=match if isinstance(match,str) else match[0]
-                    low=val.lower()
-                    if any(k in low for k in ("api","graphql","odds","sportsbook","event","market")):
-                        if val.startswith("/"): val=base.rstrip("/")+val
-                        candidates.add(val[:300])
-
-            for src in scripts[:12]:
-                try:
-                    js=await client.get(src)
-                    if js.status_code>=400 or len(js.text)>2_000_000: continue
-                    for match in re.findall(r'https?://[^"\'\s<>]+',js.text):
-                        low=match.lower()
-                        if any(k in low for k in ("api","graphql","odds","sportsbook","event","market")):
-                            candidates.add(match[:300])
-                    for match in re.findall(r'["\'](/[^"\']*(?:api|graphql|odds|sportsbook|event|market)[^"\']*)["\']',js.text,re.I):
-                        candidates.add(base.rstrip("/")+match[:280])
-                except Exception:
-                    continue
-            result["candidate_data_urls"]=sorted(candidates)[:50]
+                src=urljoin(base,m)
+                if src not in scripts:
+                    scripts.append(src)
+            result["script_count"]=len(scripts)
 
             markers=[]
-            for key in ("__NEXT_DATA__","__NUXT__","apollo","graphql","sportsbook","odds","market","event"):
-                if key.lower() in html.lower(): markers.append(key)
+            for key in ("__NEXT_DATA__","__NUXT__","apollo","graphql","sportsbook","odds","market","event","socket","websocket"):
+                if key.lower() in html.lower():
+                    markers.append(key)
             result["embedded_markers"]=markers
+
+            absolute=set()
+            paths=set()
+            hosts=set()
+            keywords=("api","graphql","odds","sportsbook","event","market","fixture","sport","bet","socket","feed")
+
+            def collect(text):
+                if not text:
+                    return
+                for match in re.findall(r'https?://[^"\'\\s<>]+',text,re.I):
+                    clean=match.replace("\\/","/")
+                    low=clean.lower()
+                    if any(k in low for k in keywords):
+                        absolute.add(clean[:500])
+                        try:
+                            host=urlparse(clean).hostname
+                            if host:
+                                hosts.add(host.lower())
+                        except Exception:
+                            pass
+                for match in re.findall(r'["\'](/[^"\']{1,300})["\']',text):
+                    clean=match.replace("\\/","/")
+                    low=clean.lower()
+                    if any(k in low for k in keywords):
+                        paths.add(clean)
+                for match in re.findall(r'["\']([^"\']{1,300})["\']',text):
+                    low=match.lower()
+                    if any(token in low for token in ("/api/","graphql","sportsbook","odds","markets","events","fixtures")):
+                        clean=match.replace("\\/","/")
+                        if clean.startswith("http"):
+                            absolute.add(clean[:500])
+                        elif clean.startswith("/"):
+                            paths.add(clean)
+
+            collect(html)
+
+            scanned=0
+            for src in scripts[:30]:
+                try:
+                    js=await client.get(src)
+                    if js.status_code>=400:
+                        continue
+                    text=js.text or ""
+                    if len(text)>3_000_000:
+                        continue
+                    collect(text)
+                    scanned+=1
+                except Exception:
+                    continue
+            result["scripts_scanned"]=scanned
+
+            result["candidate_data_urls"]=sorted(absolute)[:60]
+            result["candidate_paths"]=sorted(paths)[:80]
+            result["candidate_hosts"]=sorted(hosts)[:30]
     except Exception as exc:
         result["errors"].append(f"New-site public page probe failed: {type(exc).__name__}")
     return result
