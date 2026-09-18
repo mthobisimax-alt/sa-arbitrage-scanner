@@ -45,6 +45,18 @@
     if(Number.isFinite(Number(md.markets_checked))){
       lines.push(`<span style="color:#cbd5e1"><b>Markets checked:</b> ${Number(md.markets_checked)||0} • <b>complete same-line:</b> ${Number(md.complete_same_line_markets)||0} • <b>arbs found:</b> ${Number(md.arbs_found)||0}</span>`);
     }
+    const near=Array.isArray(data&&data.near_arbitrages)?data.near_arbitrages:[];
+    if(near.length){
+      lines.push('<span style="color:#93c5fd"><b>Closest to arb:</b></span>');
+      near.slice(0,3).forEach((n,i)=>{
+        const m=Number(n&&n.margin);
+        const margin=Number.isFinite(m)?m.toFixed(3)+'%':'—';
+        const name=String(n&&n.event_name||'Unknown event');
+        const market=String(n&&n.market||'Market');
+        const line=(n&&n.line!==undefined&&n.line!==null&&String(n.line)!=='')?' • line '+String(n.line):'';
+        lines.push(`<span style="color:#cbd5e1">${i+1}. <b>${name}</b> — ${market}${line} • <b>${margin}</b></span>`);
+      });
+    }
     if(errors.length){
       lines.push(`<span style="color:#fbbf24"><b>Diagnostic:</b> ${errors.map(e=>String(e)).join(' • ')}</span>`);
     }else if(lines.length){
