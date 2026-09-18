@@ -140,6 +140,17 @@ async def supabets_test():
 async def supabets_newsite_test():
     return JSONResponse(await probe_supabets_new_site())
 
+@app.get("/api/supabets-sports-full-test")
+async def supabets_sports_full_test():
+    result=await probe_supabets_new_site()
+    return JSONResponse({
+        "provider":result.get("provider"),
+        "reachable":result.get("reachable"),
+        "framework":result.get("framework"),
+        "sports_full_probe":result.get("sports_full_probe",{}),
+        "errors":result.get("errors",[])
+    })
+
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
 
