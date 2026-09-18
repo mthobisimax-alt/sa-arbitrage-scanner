@@ -399,3 +399,65 @@ async def probe_supabets_bundle_context():
     except Exception as exc:
         result["errors"].append(f"Bundle context probe failed: {type(exc).__name__}")
     return result
+
+
+async def probe_supabets_public_sports_api():
+    url="https://apib2c.supabets.co.za/api/b2c/EventsProgram/sports-full"
+    result={
+        "provider":"Supabets Public Sports API",
+        "url":url,
+        "status":None,
+        "content_type":"",
+        "json_type":"",
+        "top_level_keys":[],
+        "item_count":None,
+        "sample_keys":[],
+        "errors":[]
+    }
+    headers={
+        "x-api-key":"H3DigitalAPIB2CWebsiteUser",
+        "Accept":"application/json",
+        "Content-Type":"application/json",
+        "Origin":"https://new.supabets.co.za",
+        "Referer":"https://new.supabets.co.za/",
+        "User-Agent":"Mozilla/5.0"
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0),follow_redirects=True,headers=headers) as client:
+            r=await client.get(url)
+            result["status"]=r.status_code
+            result["content_type"]=str(r.headers.get("content-type") or "")
+            body=(r.text or "").strip()
+            if r.status_code>=400:
+                result["errors"].append(f"HTTP {r.status_code}")
+                result["preview"]=" ".join(body.replace("\r"," ").replace("\n"," ").split())[:240]
+                return result
+            try:
+                data=r.json()
+                result["json_type"]=type(data).__name__
+                if isinstance(data,dict):
+                    result["top_level_keys"]=list(data.keys())[:40]
+                    for key in ("data","sports","events","result","items","content"):
+                        value=data.get(key)
+                        if isinstance(value,list):
+                            result["item_count"]=len(value)
+                            if value and isinstance(value[0],dict):
+                                result["sample_keys"]=list(value[0].keys())[:40]
+                            break
+                    if result["item_count"] is None:
+                        for key,value in data.items():
+                            if isinstance(value,list):
+                                result["item_count"]=len(value)
+                                if value and isinstance(value[0],dict):
+                                    result["sample_keys"]=list(value[0].keys())[:40]
+                                break
+                elif isinstance(data,list):
+                    result["item_count"]=len(data)
+                    if data and isinstance(data[0],dict):
+                        result["sample_keys"]=list(data[0].keys())[:40]
+            except Exception as exc:
+                result["errors"].append(f"JSON parse failed: {type(exc).__name__}")
+                result["preview"]=" ".join(body.replace("\r"," ").replace("\n"," ").split())[:240]
+    except Exception as exc:
+        result["errors"].append(f"Public sports API probe failed: {type(exc).__name__}")
+    return result
