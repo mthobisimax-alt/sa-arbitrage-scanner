@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from engine import find_arbs, find_preferred_arbs, find_near_arbs, market_diagnostics
 from feeds import fetch_all_feeds, fetch_oddspapi_account
 from sgo_feed import fetch_sportsgameodds_fixed
-from supabets_feed import probe_supabets, probe_supabets_new_site, probe_supabets_bundle_context, probe_supabets_public_sports_api
+from supabets_feed import probe_supabets, probe_supabets_new_site, probe_supabets_bundle_context, probe_supabets_public_sports_api, probe_supabets_soccer_program
 # Supabets diagnostic probe v2
 
 with open("config.json") as f: CFG=json.load(f)
@@ -158,6 +158,10 @@ async def supabets_bundle_context_test():
 @app.get("/api/supabets-public-sports-test")
 async def supabets_public_sports_test():
     return JSONResponse(await probe_supabets_public_sports_api())
+
+@app.get("/api/supabets-soccer-program-test")
+async def supabets_soccer_program_test():
+    return JSONResponse(await probe_supabets_soccer_program())
 
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
