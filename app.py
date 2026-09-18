@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
-from engine import find_arbs, find_preferred_arbs, market_diagnostics
+from engine import find_arbs, find_preferred_arbs, find_near_arbs, market_diagnostics
 from feeds import fetch_all_feeds, fetch_oddspapi_account
 from sgo_feed import fetch_sportsgameodds_fixed
 
@@ -42,7 +42,7 @@ def seconds_since_update():
     try: return max(0,(datetime.now(timezone.utc)-datetime.fromisoformat(value.replace("Z","+00:00"))).total_seconds())
     except Exception: return None
 
-latest={"quotes":[],"opportunities":[],"preferred_opportunities":[],"preferred_opportunity_count":0,"updated_at":None,"errors":[],"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":[],"scan_state":"idle","quota":{"available":False},"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS,"fallback_available":fallback_available(),"market_diagnostics":{"markets_checked":0,"complete_same_line_markets":0,"incomplete_markets":0,"arbs_found":0}}
+latest={"quotes":[],"opportunities":[],"preferred_opportunities":[],"preferred_opportunity_count":0,"updated_at":None,"errors":[],"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":[],"scan_state":"idle","quota":{"available":False},"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS,"fallback_available":fallback_available(),"market_diagnostics":{"markets_checked":0,"complete_same_line_markets":0,"incomplete_markets":0,"arbs_found":0},"near_arbitrages":[]}
 
 async def scan():
     quotes=[]; errors=[]
@@ -84,7 +84,8 @@ async def run_scan_if_allowed():
                 except (TypeError,ValueError): after["last_scan_requests"]=None
             diag=market_diagnostics(quotes,CFG.get("max_quote_age_seconds",20))
             diag["arbs_found"]=len(opportunities)
-            latest={"quotes":quotes,"opportunities":opportunities,"preferred_opportunities":sa_opps,"preferred_opportunity_count":len(sa_opps),"updated_at":datetime.now(timezone.utc).isoformat(),"errors":errors,"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":detected_preferred_bookmakers(quotes),"scan_state":"ok" if not errors else "completed_with_errors","quota":after,"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS,"fallback_available":fallback_available(),"market_diagnostics":diag}
+            near=find_near_arbs(quotes,CFG.get("max_quote_age_seconds",20),CFG.get("min_margin_percent",0.10),3)
+            latest={"quotes":quotes,"opportunities":opportunities,"preferred_opportunities":sa_opps,"preferred_opportunity_count":len(sa_opps),"updated_at":datetime.now(timezone.utc).isoformat(),"errors":errors,"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":detected_preferred_bookmakers(quotes),"scan_state":"ok" if not errors else "completed_with_errors","quota":after,"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS,"fallback_available":fallback_available(),"market_diagnostics":diag,"near_arbitrages":near}
             return {"started":True,"reason":"completed"}
         except asyncio.TimeoutError:
             latest["scan_state"]="timeout"; latest["errors"]=[f"Scanner cycle timed out after {scan_timeout} seconds"]; return {"started":True,"reason":"timeout"}
