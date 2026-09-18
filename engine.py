@@ -38,6 +38,27 @@ def _opportunity(best,min_margin,preferred_anchor=None):
     first=next(iter(best.values())); warning=margin>=10
     legs=[{"selection":q["selection"],"bookmaker":q["bookmaker"],"bookmaker_url":q.get("bookmaker_url",""),"bookmaker_host":q.get("bookmaker_host",""),"sa_link_status":q.get("sa_link_status","not_applicable"),"odds":float(q["odds"]),"timestamp":q.get("timestamp")} for q in best.values()]
     return {"event_name":first.get("event_name"),"sport":first.get("sport"),"league":first.get("league"),"market":first.get("market"),"market_id":first.get("market_id"),"market_type":first.get("market_type"),"period":first.get("period"),"line":first.get("line",""),"inverse_sum":round(inverse_sum,8),"margin":round(margin,4),"verify_warning":warning,"warning_reason":"Unusually high margin — verify every bookmaker price and settlement rule before betting." if warning else "","preferred_anchor":preferred_anchor or "","legs":legs}
+def market_diagnostics(quotes,max_age=20):
+    groups=_groups(quotes,max_age)
+    complete=0
+    incomplete=0
+    for rows in groups.values():
+        best={}
+        for q in rows:
+            try:
+                selection=normalize_text(q.get("selection")); odds=float(q["odds"])
+            except Exception:
+                continue
+            if selection and (selection not in best or odds>float(best[selection]["odds"])):
+                best[selection]=q
+        if _complete_group(best,rows): complete+=1
+        else: incomplete+=1
+    return {
+        "markets_checked": len(groups),
+        "complete_same_line_markets": complete,
+        "incomplete_markets": incomplete
+    }
+
 def find_arbs(quotes,max_age=20,min_margin=0.10):
     opportunities=[]
     for rows in _groups(quotes,max_age).values():
