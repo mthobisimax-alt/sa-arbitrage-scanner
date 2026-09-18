@@ -617,3 +617,66 @@ async def probe_supabets_soccer_groups():
     except Exception as exc:
         result["errors"].append(f"Supabets soccer group probe failed: {type(exc).__name__}: {exc}")
     return result
+
+
+async def probe_supabets_event_api_paths():
+    base="https://new.supabets.co.za/"
+    result={
+        "provider":"Supabets New Site",
+        "reachable":False,
+        "scripts_scanned":0,
+        "event_api_paths":[],
+        "event_contexts":[],
+        "errors":[]
+    }
+    try:
+        import re
+        from urllib.parse import urljoin
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0),follow_redirects=True,headers={"User-Agent":"Mozilla/5.0"}) as client:
+            r=await client.get(base)
+            r.raise_for_status()
+            result["reachable"]=True
+            html=r.text or ""
+            scripts=[]
+            for m in re.findall(r'<script[^>]+src=["\']([^"\']+)["\']',html,re.I):
+                src=urljoin(base,m)
+                if src not in scripts:
+                    scripts.append(src)
+
+            paths=set()
+            contexts=[]
+            for src in scripts[:40]:
+                try:
+                    js=await client.get(src)
+                    if js.status_code>=400:
+                        continue
+                    text=js.text or ""
+                    if len(text)>3_500_000:
+                        continue
+                    result["scripts_scanned"]+=1
+
+                    for m in re.findall(r'["\'](/api/b2c/EventsProgram/[^"\']{1,220})["\']',text):
+                        paths.add(m.replace("\\/","/"))
+
+                    lower=text.lower()
+                    for token in ("subevent","eventid","eventsprogram/"):
+                        pos=0
+                        hits=0
+                        while hits<10:
+                            idx=lower.find(token,pos)
+                            if idx<0:
+                                break
+                            a=max(0,idx-500); b=min(len(text),idx+1100)
+                            snippet=" ".join(text[a:b].replace("\r"," ").replace("\n"," ").split())
+                            if "/api/b2c/EventsProgram/" in snippet or "sportB2CApi" in snippet:
+                                contexts.append({"token":token,"script":src.rsplit("/",1)[-1],"context":snippet[:1500]})
+                            pos=idx+len(token)
+                            hits+=1
+                except Exception:
+                    continue
+
+            result["event_api_paths"]=sorted(paths)[:80]
+            result["event_contexts"]=contexts[:40]
+    except Exception as exc:
+        result["errors"].append(f"Event API path probe failed: {type(exc).__name__}: {exc}")
+    return result
