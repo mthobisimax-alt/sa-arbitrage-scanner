@@ -1,12 +1,11 @@
 {
   "poll_seconds": 43200,
   "max_quote_age_seconds": 900,
-  "min_margin_percent": 0.10,
+  "min_margin_percent": 0.1,
   "scan_timeout_seconds": 45,
   "demo_mode": false,
   "provider_strategy": "quota_aware_fallback",
   "min_quotes_to_stop": 20,
-
   "providers": [
     {
       "enabled": true,
@@ -47,6 +46,20 @@
         "Betway ZA",
         "Supabets",
         "Sportingbet"
+      ]
+    },
+    {
+      "enabled": false,
+      "diagnostic_only": true,
+      "priority": 3,
+      "name": "Supabets Direct",
+      "adapter": "supabets_marketws",
+      "base_url": "https://mobile.supabets.co.za/Controls/MarketWS.asmx",
+      "probe_active_events": false,
+      "group_id": "",
+      "timeout_seconds": 12,
+      "preferred_bookmakers": [
+        "Supabets"
       ]
     }
   ]
