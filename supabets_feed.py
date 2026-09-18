@@ -556,3 +556,64 @@ async def probe_supabets_soccer_program():
     except Exception as exc:
         result["errors"].append(f"Supabets soccer program probe failed: {type(exc).__name__}: {exc}")
     return result
+
+
+async def probe_supabets_soccer_groups():
+    base="https://apib2c.supabets.co.za"
+    headers={
+        "x-api-key":"H3DigitalAPIB2CWebsiteUser",
+        "Accept":"application/json",
+        "Content-Type":"application/json",
+        "Origin":"https://new.supabets.co.za",
+        "Referer":"https://new.supabets.co.za/",
+        "User-Agent":"Mozilla/5.0"
+    }
+    result={
+        "provider":"Supabets Public Sports API",
+        "sportId":163,
+        "status":None,
+        "group_count":0,
+        "group_sample_keys":[],
+        "group_samples":[],
+        "nested_list_keys":[],
+        "errors":[]
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0),follow_redirects=True,headers=headers) as client:
+            url=base+"/api/b2c/EventsProgram/program?sportId=163"
+            r=await client.get(url)
+            result["status"]=r.status_code
+            r.raise_for_status()
+            payload=r.json()
+            data=payload.get("data") if isinstance(payload,dict) else payload
+            if not isinstance(data,list) or not data or not isinstance(data[0],dict):
+                result["errors"].append("Unexpected soccer program structure")
+                return result
+            sport=data[0]
+            groups=sport.get("groups")
+            if not isinstance(groups,list):
+                result["errors"].append("Soccer program has no groups list")
+                return result
+            result["group_count"]=len(groups)
+            if groups and isinstance(groups[0],dict):
+                result["group_sample_keys"]=list(groups[0].keys())[:60]
+            samples=[]
+            nested=set()
+            for g in groups[:8]:
+                if not isinstance(g,dict):
+                    continue
+                sample={}
+                for k,v in g.items():
+                    if isinstance(v,(str,int,float,bool)) or v is None:
+                        sample[k]=v
+                    elif isinstance(v,list):
+                        sample[k+"_count"]=len(v)
+                        nested.add(k)
+                        if v and isinstance(v[0],dict):
+                            sample[k+"_sample_keys"]=list(v[0].keys())[:40]
+                samples.append(sample)
+            result["group_samples"]=samples
+            result["nested_list_keys"]=sorted(nested)
+    except Exception as exc:
+        result["errors"].append(f"Supabets soccer group probe failed: {type(exc).__name__}: {exc}")
+    return result
