@@ -82,7 +82,9 @@ async def run_scan_if_allowed():
             if before.get("available") and after.get("available"):
                 try: after["last_scan_requests"]=max(0,int(after.get("request_count",0))-int(before.get("request_count",0)))
                 except (TypeError,ValueError): after["last_scan_requests"]=None
-            diag=market_diagnostics(quotes,CFG.get("max_quote_age_seconds",20)); diag["arbs_found"]=len(opportunities)\n            latest={"quotes":quotes,"opportunities":opportunities,"preferred_opportunities":sa_opps,"preferred_opportunity_count":len(sa_opps),"updated_at":datetime.now(timezone.utc).isoformat(),"errors":errors,"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":detected_preferred_bookmakers(quotes),"scan_state":"ok" if not errors else "completed_with_errors","quota":after,"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS,"fallback_available":fallback_available(),"market_diagnostics":diag}
+            diag=market_diagnostics(quotes,CFG.get("max_quote_age_seconds",20))
+            diag["arbs_found"]=len(opportunities)
+            latest={"quotes":quotes,"opportunities":opportunities,"preferred_opportunities":sa_opps,"preferred_opportunity_count":len(sa_opps),"updated_at":datetime.now(timezone.utc).isoformat(),"errors":errors,"feed_names":feed_names(),"preferred_bookmakers":preferred_bookmakers(),"preferred_detected":detected_preferred_bookmakers(quotes),"scan_state":"ok" if not errors else "completed_with_errors","quota":after,"scan_mode":"on_demand","min_scan_interval_seconds":MIN_SCAN_INTERVAL_SECONDS,"fallback_available":fallback_available(),"market_diagnostics":diag}
             return {"started":True,"reason":"completed"}
         except asyncio.TimeoutError:
             latest["scan_state"]="timeout"; latest["errors"]=[f"Scanner cycle timed out after {scan_timeout} seconds"]; return {"started":True,"reason":"timeout"}
