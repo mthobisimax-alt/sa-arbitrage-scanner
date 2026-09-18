@@ -59,6 +59,46 @@ def market_diagnostics(quotes,max_age=20):
         "incomplete_markets": incomplete
     }
 
+def find_near_arbs(quotes,max_age=20,min_margin=0.10,limit=3):
+    near=[]
+    for rows in _groups(quotes,max_age).values():
+        best={}
+        for q in rows:
+            try:
+                selection=normalize_text(q.get("selection")); odds=float(q["odds"])
+            except Exception:
+                continue
+            if selection and (selection not in best or odds>float(best[selection]["odds"])):
+                best[selection]=q
+        if not _complete_group(best,rows):
+            continue
+        if len({normalize_text(q.get("bookmaker")) for q in best.values()})<2:
+            continue
+        inverse_sum=sum(1/float(q["odds"]) for q in best.values())
+        margin=((1/inverse_sum)-1)*100
+        if margin>=min_margin:
+            continue
+        first=next(iter(best.values()))
+        near.append({
+            "event_name":first.get("event_name"),
+            "sport":first.get("sport"),
+            "league":first.get("league"),
+            "market":first.get("market"),
+            "market_id":first.get("market_id"),
+            "market_type":first.get("market_type"),
+            "period":first.get("period"),
+            "line":first.get("line",""),
+            "inverse_sum":round(inverse_sum,8),
+            "margin":round(margin,4),
+            "legs":[{
+                "selection":q.get("selection"),
+                "bookmaker":q.get("bookmaker"),
+                "odds":float(q.get("odds")),
+                "timestamp":q.get("timestamp")
+            } for q in best.values()]
+        })
+    return sorted(near,key=lambda x:x["margin"],reverse=True)[:max(1,int(limit))]
+
 def find_arbs(quotes,max_age=20,min_margin=0.10):
     opportunities=[]
     for rows in _groups(quotes,max_age).values():
