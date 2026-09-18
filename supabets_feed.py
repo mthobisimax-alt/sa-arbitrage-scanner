@@ -97,6 +97,7 @@ async def probe_supabets(cfg):
         "reachable":False,
         "operations":[],
         "operation_parameters":{},
+        "operation_probes":[],
         "events":[],
         "quotes":[],
         "errors":[]
@@ -138,6 +139,35 @@ async def probe_supabets(cfg):
             for name,params in known.items():
                 if name in discovered:
                     result["operation_parameters"][name]=params
+
+            test_params={
+                "getClientActiveEventsByGroup":{
+                    "IDPalinsesto":"0","IDGruppo":"0","TipoVisualizzazioneQuote":"0","IDLingua":"1"
+                },
+                "getClientOddsBySubeEvent":{
+                    "IDPalinsesto":"0","IDSottoEvento":"0","IDLingua":"1","IDGmt":"2"
+                },
+                "GetListOdds_OddLessThan":{
+                    "strQuotaMax":"2.00","strIDSport":"1","typeOrder":"0","tipoVisQuote":"0"
+                }
+            }
+            for name,params in test_params.items():
+                try:
+                    r=await client.get(base+"/"+name,params=params)
+                    preview=" ".join((r.text or "").replace("\r"," ").replace("\n"," ").split())[:180]
+                    result["operation_probes"].append({
+                        "operation":name,
+                        "status":r.status_code,
+                        "content_type":str(r.headers.get("content-type") or ""),
+                        "final_url":str(r.url).split("?")[0],
+                        "looks_like_xml":("<" in (r.text or "") and ("<?xml" in (r.text or "")[:100].lower() or "<string" in (r.text or "")[:200].lower())),
+                        "preview":preview
+                    })
+                except Exception as exc:
+                    result["operation_probes"].append({
+                        "operation":name,
+                        "error":type(exc).__name__
+                    })
 
             group_id=str(cfg.get("group_id") or "").strip()
             if cfg.get("probe_active_events",False) and group_id:
