@@ -461,3 +461,98 @@ async def probe_supabets_public_sports_api():
     except Exception as exc:
         result["errors"].append(f"Public sports API probe failed: {type(exc).__name__}")
     return result
+
+
+async def probe_supabets_soccer_program():
+    base="https://apib2c.supabets.co.za"
+    headers={
+        "x-api-key":"H3DigitalAPIB2CWebsiteUser",
+        "Accept":"application/json",
+        "Content-Type":"application/json",
+        "Origin":"https://new.supabets.co.za",
+        "Referer":"https://new.supabets.co.za/",
+        "User-Agent":"Mozilla/5.0"
+    }
+    result={
+        "provider":"Supabets Public Sports API",
+        "sports_status":None,
+        "soccer_candidates":[],
+        "selected_soccer":None,
+        "program_probe":{},
+        "errors":[]
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0),follow_redirects=True,headers=headers) as client:
+            sports_url=base+"/api/b2c/EventsProgram/sports-full"
+            sr=await client.get(sports_url)
+            result["sports_status"]=sr.status_code
+            sr.raise_for_status()
+            payload=sr.json()
+            sports=payload.get("data") if isinstance(payload,dict) else payload
+            sports=sports if isinstance(sports,list) else []
+
+            for item in sports:
+                if not isinstance(item,dict):
+                    continue
+                name=str(item.get("name") or "")
+                slug=str(item.get("slug") or "")
+                if any(k in (name+" "+slug).lower() for k in ("soccer","football")):
+                    result["soccer_candidates"].append({
+                        "sportId":item.get("sportId"),
+                        "sportTypeId":item.get("sportTypeId"),
+                        "name":name,
+                        "slug":slug,
+                        "subEventsCount":item.get("subEventsCount")
+                    })
+
+            selected=None
+            for item in result["soccer_candidates"]:
+                text=(str(item.get("name") or "")+" "+str(item.get("slug") or "")).lower()
+                if "soccer" in text:
+                    selected=item
+                    break
+            if selected is None and result["soccer_candidates"]:
+                selected=result["soccer_candidates"][0]
+            result["selected_soccer"]=selected
+
+            if selected and selected.get("sportId") is not None:
+                sport_id=selected["sportId"]
+                program_url=base+f"/api/b2c/EventsProgram/program?sportId={sport_id}"
+                pr=await client.get(program_url)
+                probe={
+                    "url":program_url,
+                    "status":pr.status_code,
+                    "content_type":str(pr.headers.get("content-type") or "")
+                }
+                body=(pr.text or "").strip()
+                if pr.status_code>=400:
+                    probe["preview"]=" ".join(body.replace("\r"," ").replace("\n"," ").split())[:260]
+                else:
+                    try:
+                        data=pr.json()
+                        probe["json_type"]=type(data).__name__
+                        if isinstance(data,dict):
+                            probe["top_level_keys"]=list(data.keys())[:40]
+                            values=[]
+                            for key,val in data.items():
+                                if isinstance(val,list):
+                                    values.append((key,val))
+                            if values:
+                                key,val=values[0]
+                                probe["list_key"]=key
+                                probe["item_count"]=len(val)
+                                if val and isinstance(val[0],dict):
+                                    probe["sample_keys"]=list(val[0].keys())[:50]
+                                    probe["sample_item"]={k:val[0].get(k) for k in probe["sample_keys"][:12]}
+                        elif isinstance(data,list):
+                            probe["item_count"]=len(data)
+                            if data and isinstance(data[0],dict):
+                                probe["sample_keys"]=list(data[0].keys())[:50]
+                                probe["sample_item"]={k:data[0].get(k) for k in probe["sample_keys"][:12]}
+                    except Exception as exc:
+                        probe["json_parse_error"]=type(exc).__name__
+                        probe["preview"]=" ".join(body.replace("\r"," ").replace("\n"," ").split())[:260]
+                result["program_probe"]=probe
+    except Exception as exc:
+        result["errors"].append(f"Supabets soccer program probe failed: {type(exc).__name__}: {exc}")
+    return result
