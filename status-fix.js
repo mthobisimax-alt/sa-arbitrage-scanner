@@ -55,6 +55,16 @@
         const market=String(n&&n.market||'Market');
         const line=(n&&n.line!==undefined&&n.line!==null&&String(n.line)!=='')?' • line '+String(n.line):'';
         lines.push(`<span style="color:#cbd5e1">${i+1}. <b>${name}</b> — ${market}${line} • <b>${margin}</b></span>`);
+        const legs=Array.isArray(n&&n.legs)?n.legs:[];
+        if(legs.length){
+          const legText=legs.map(l=>{
+            const sel=String(l&&l.selection||'Selection');
+            const book=String(l&&l.bookmaker||'Bookmaker');
+            const odds=Number(l&&l.odds);
+            return `${sel}: <b>${book}</b> @ ${Number.isFinite(odds)?odds.toFixed(2):'—'}`;
+          }).join(' • ');
+          lines.push(`<span style="color:#94a3b8;margin-left:8px">↳ ${legText}</span>`);
+        }
       });
     }
     if(errors.length){
