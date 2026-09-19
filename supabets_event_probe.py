@@ -1063,3 +1063,109 @@ async def discover_supabets_subevent_loader():
             f"Supabets sub-event loader discovery failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def discover_supabets_odds_loader_tokens():
+    base = "https://new.supabets.co.za/"
+    result = {
+        "provider": "Supabets New Site",
+        "reachable": False,
+        "scripts_scanned": 0,
+        "matches": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as client:
+            page = await client.get(base)
+            page.raise_for_status()
+            result["reachable"] = True
+            html = page.text or ""
+
+            scripts = []
+            pos = 0
+            while True:
+                start = html.lower().find("<script", pos)
+                if start < 0:
+                    break
+                end = html.find(">", start)
+                if end < 0:
+                    break
+                tag = html[start:end + 1]
+                low = tag.lower()
+                src_pos = low.find("src=")
+                if src_pos >= 0:
+                    value_start = src_pos + 4
+                    while value_start < len(tag) and tag[value_start].isspace():
+                        value_start += 1
+                    if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                        quote = tag[value_start]
+                        value_end = tag.find(quote, value_start + 1)
+                        if value_end > value_start:
+                            src = urljoin(base, tag[value_start + 1:value_end])
+                            if src not in scripts:
+                                scripts.append(src)
+                pos = end + 1
+
+            tokens = (
+                "getClientActiveEventsByGroup",
+                "getClientOddsBySubeEvent",
+                "getClientOddsBySubEvent",
+                "GetListOdds_OddLessThan",
+                "MarketWS",
+                "IDGruppo",
+                "IDSottoEvento",
+                "IDPalinsesto",
+                "palinsesto",
+                "odds",
+                "market",
+            )
+            matches = []
+            seen = set()
+
+            for src in scripts[:50]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 4500000:
+                        continue
+                    result["scripts_scanned"] += 1
+                    lower = text.lower()
+
+                    for token in tokens:
+                        needle = token.lower()
+                        search_from = 0
+                        hits = 0
+                        while hits < 12:
+                            idx = lower.find(needle, search_from)
+                            if idx < 0:
+                                break
+                            left = max(0, idx - 1200)
+                            right = min(len(text), idx + 2200)
+                            context = " ".join(
+                                text[left:right].replace("\r"," ").replace("\n"," ").split()
+                            )
+                            key = (src.rsplit("/",1)[-1], token, context[:240])
+                            if key not in seen:
+                                seen.add(key)
+                                matches.append({
+                                    "token": token,
+                                    "script": src.rsplit("/",1)[-1],
+                                    "context": context[:2800],
+                                })
+                            search_from = idx + len(needle)
+                            hits += 1
+                except Exception:
+                    continue
+
+            result["matches"] = matches[:100]
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets odds-loader discovery failed: {type(exc).__name__}: {exc}"
+        )
+    return result
