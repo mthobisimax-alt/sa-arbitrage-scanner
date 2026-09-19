@@ -697,17 +697,19 @@ async def probe_supabets_sport_client_calls():
             result["reachable"]=True
             html=r.text or ""
             scripts=[]
-            for m in re.findall(r"<script[^>]+src=[\"']([^\"']+)[\"']", html, re.I):
-                src=urljoin(base,m)
-                if src not in scripts:
-                    scripts.append(src)
+            for m in re.findall(r"<script[^>]+src=[^ >]+", html, re.I):
+                part=m.split("src=",1)[-1].strip()
+                if part and part[0] in ("\"", "'"):
+                    quote=part[0]
+                    end=part.find(quote,1)
+                    if end>1:
+                        src=urljoin(base,part[1:end])
+                        if src not in scripts:
+                            scripts.append(src)
 
             calls=[]
             seen=set()
-            patterns=[
-                re.compile(r"sportB2CApi\.(get|post|put|delete)\(\s*[\"']([^\"']{1,260})[\"']", re.I),
-                re.compile(r"sportB2CApi\.(get|post|put|delete)\(\s*`([^`]{1,320})`", re.I),
-            ]
+            needles=("sportB2CApi.get(", "sportB2CApi.post(", "sportB2CApi.put(", "sportB2CApi.delete(")
             for src in scripts[:40]:
                 try:
                     js=await client.get(src)
@@ -717,23 +719,31 @@ async def probe_supabets_sport_client_calls():
                     if len(text)>3500000:
                         continue
                     result["scripts_scanned"]+=1
-                    for pat in patterns:
-                        for m in pat.finditer(text):
-                            method=m.group(1).upper()
-                            path=m.group(2).replace("\\/","/")
-                            key=(method,path)
-                            if key in seen:
-                                continue
-                            seen.add(key)
-                            a=max(0,m.start()-260)
-                            b=min(len(text),m.end()+420)
-                            context=" ".join(text[a:b].replace("\r"," ").replace("\n"," ").split())
-                            calls.append({
-                                "method":method,
-                                "path":path,
-                                "script":src.rsplit("/",1)[-1],
-                                "context":context[:900]
-                            })
+                    for needle in needles:
+                        pos=0
+                        while True:
+                            idx=text.find(needle,pos)
+                            if idx<0:
+                                break
+                            method=needle.split(".",1)[1].split("(",1)[0].upper()
+                            arg_start=idx+len(needle)
+                            while arg_start<len(text) and text[arg_start].isspace():
+                                arg_start+=1
+                            path=""
+                            if arg_start<len(text) and text[arg_start] in ("\"", "'", "`"):
+                                quote=text[arg_start]
+                                end=text.find(quote,arg_start+1)
+                                if end>arg_start:
+                                    path=text[arg_start+1:end].replace("\\/","/")
+                            if path:
+                                key=(method,path)
+                                if key not in seen:
+                                    seen.add(key)
+                                    a=max(0,idx-220)
+                                    b=min(len(text),idx+900)
+                                    context=" ".join(text[a:b].replace("\r"," ").replace("\n"," ").split())
+                                    calls.append({"method":method,"path":path,"script":src.rsplit("/",1)[-1],"context":context[:1000]})
+                            pos=idx+len(needle)
             result["sport_client_calls"]=calls[:120]
     except Exception as exc:
         result["errors"].append(f"Sport client call probe failed: {type(exc).__name__}: {exc}")
