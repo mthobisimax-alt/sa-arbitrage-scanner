@@ -106,6 +106,57 @@ async def discover_supabets_sport_calls():
                     continue
 
             result["sport_client_calls"] = calls[:120]
+
+            api_occurrences = []
+            api_seen = set()
+            for src in scripts[:40]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 3500000:
+                        continue
+
+                    search_from = 0
+                    needle = "/api/b2c/"
+                    while True:
+                        idx = text.find(needle, search_from)
+                        if idx < 0:
+                            break
+
+                        left = max(0, idx - 260)
+                        right = min(len(text), idx + 900)
+                        context = " ".join(
+                            text[left:right]
+                            .replace("\r", " ")
+                            .replace("\n", " ")
+                            .split()
+                        )
+
+                        path_end = idx
+                        stop_chars = set(['"', "'", " ", ")", ",", ";", "}"])
+                        while path_end < len(text) and path_end - idx < 320:
+                            if path_end > idx and text[path_end] in stop_chars:
+                                break
+                            path_end += 1
+                        path = text[idx:path_end].replace("\\/", "/")
+
+                        key = (src.rsplit("/", 1)[-1], path)
+                        if key not in api_seen:
+                            api_seen.add(key)
+                            api_occurrences.append({
+                                "path": path,
+                                "script": src.rsplit("/", 1)[-1],
+                                "context": context[:1100],
+                            })
+
+                        search_from = idx + len(needle)
+
+                except Exception:
+                    continue
+
+            result["api_path_occurrences"] = api_occurrences[:120]
     except Exception as exc:
         result["errors"].append(
             f"Supabets sport call discovery failed: {type(exc).__name__}: {exc}"
