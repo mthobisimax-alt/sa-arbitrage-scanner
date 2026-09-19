@@ -11,7 +11,7 @@ from sgo_feed import fetch_sportsgameodds_fixed
 from supabets_feed import probe_supabets, probe_supabets_new_site, probe_supabets_bundle_context, probe_supabets_public_sports_api, probe_supabets_soccer_program, probe_supabets_soccer_groups, probe_supabets_event_api_paths
 # Supabets diagnostic probe v2
 from supabets_marketws_probe import probe_supabets_marketws
-from supabets_event_probe import discover_supabets_sport_calls, fetch_supabets_soccer_event_samples, discover_supabets_event_detail_calls, discover_supabets_b2c_betting_paths, discover_supabets_public_routes, discover_supabets_sports_page_calls, probe_supabets_event_endpoint_candidates, inspect_supabets_competition_object, discover_supabets_subevent_loader, discover_supabets_odds_loader_tokens, discover_supabets_sport_api_calls_escaped
+from supabets_event_probe import discover_supabets_sport_calls, fetch_supabets_soccer_event_samples, discover_supabets_event_detail_calls, discover_supabets_b2c_betting_paths, discover_supabets_public_routes, discover_supabets_sports_page_calls, probe_supabets_event_endpoint_candidates, inspect_supabets_competition_object, discover_supabets_subevent_loader, discover_supabets_odds_loader_tokens, discover_supabets_sport_api_calls_escaped, inspect_supabets_sport_client_raw
 
 with open("config.json") as f: CFG=json.load(f)
 app=FastAPI(title="SA Arb Scanner Web"); templates=Jinja2Templates(directory=".")
@@ -246,6 +246,10 @@ async def supabets_sport_api_calls_test():
 @app.get("/api/supabets-marketws-test")
 async def supabets_marketws_test():
     return JSONResponse(await probe_supabets_marketws())
+
+@app.get("/api/supabets-sport-client-raw-test")
+async def supabets_sport_client_raw_test():
+    return JSONResponse(await inspect_supabets_sport_client_raw())
 
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
