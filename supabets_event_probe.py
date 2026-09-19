@@ -1729,3 +1729,135 @@ async def inspect_supabets_api_clients():
             f"Supabets API-client inspection failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def inspect_supabets_fixtures_route_context():
+    base = "https://new.supabets.co.za/"
+    result = {
+        "provider": "Supabets New Site",
+        "reachable": False,
+        "scripts_scanned": 0,
+        "matches": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as client:
+            page = await client.get(base)
+            page.raise_for_status()
+            result["reachable"] = True
+            html = page.text or ""
+
+            scripts = []
+            pos = 0
+            while True:
+                start = html.lower().find("<script", pos)
+                if start < 0:
+                    break
+                end = html.find(">", start)
+                if end < 0:
+                    break
+                tag = html[start:end + 1]
+                low = tag.lower()
+                src_pos = low.find("src=")
+                if src_pos >= 0:
+                    value_start = src_pos + 4
+                    while value_start < len(tag) and tag[value_start].isspace():
+                        value_start += 1
+                    if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                        quote = tag[value_start]
+                        value_end = tag.find(quote, value_start + 1)
+                        if value_end > value_start:
+                            src = urljoin(base, tag[value_start + 1:value_end])
+                            if src not in scripts:
+                                scripts.append(src)
+                pos = end + 1
+
+            needles = (
+                '"/fixtures"',
+                "'/fixtures'",
+                "/fixtures",
+                "fixtures",
+            )
+            found = []
+            seen = set()
+
+            for src in scripts[:50]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 5000000:
+                        continue
+                    result["scripts_scanned"] += 1
+                    lower = text.lower()
+
+                    for needle in needles:
+                        needle_lower = needle.lower()
+                        search_from = 0
+                        hits = 0
+                        while hits < 20:
+                            idx = lower.find(needle_lower, search_from)
+                            if idx < 0:
+                                break
+
+                            left = max(0, idx - 2600)
+                            right = min(len(text), idx + 8000)
+                            block = text[left:right]
+                            compact = " ".join(
+                                block.replace("\r"," ").replace("\n"," ").split()
+                            )
+
+                            api_paths = []
+                            p = 0
+                            while True:
+                                api_idx = block.find("/api/", p)
+                                if api_idx < 0:
+                                    break
+                                api_end = api_idx
+                                while api_end < len(block) and api_end - api_idx < 700:
+                                    ch = block[api_end]
+                                    if api_end > api_idx and ch in ('"', "'", "`", " ", "\n", "\r"):
+                                        break
+                                    api_end += 1
+                                path = block[api_idx:api_end].replace("\\/", "/")
+                                if path and path not in api_paths:
+                                    api_paths.append(path)
+                                p = api_idx + 5
+
+                            urls = []
+                            for host in (
+                                "https://apib2c.supabets.co.za",
+                                "https://supaskins-backend.azurewebsites.net/api/v1",
+                                "https://api.sbpay.co.za",
+                            ):
+                                if host in block and host not in urls:
+                                    urls.append(host)
+
+                            key = (src.rsplit("/",1)[-1], needle, idx)
+                            if key not in seen:
+                                seen.add(key)
+                                found.append({
+                                    "needle": needle,
+                                    "script": src.rsplit("/",1)[-1],
+                                    "index": idx,
+                                    "backend_urls_nearby": urls,
+                                    "api_paths_nearby": api_paths[:60],
+                                    "context": compact[:7000],
+                                })
+
+                            search_from = idx + len(needle_lower)
+                            hits += 1
+                except Exception:
+                    continue
+
+            result["matches"] = found[:40]
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets fixtures route inspection failed: {type(exc).__name__}: {exc}"
+        )
+    return result
