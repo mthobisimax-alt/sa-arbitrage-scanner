@@ -490,8 +490,29 @@ async def discover_supabets_public_routes():
         "provider": "Supabets New Site",
         "reachable": False,
         "route_candidates": [],
+        "script_route_candidates": [],
+        "scripts_scanned": 0,
         "errors": [],
     }
+
+    def is_route_candidate(value):
+        if not value:
+            return False
+        low = value.lower()
+        if low.startswith(("mailto:", "tel:", "javascript:", "#")):
+            return False
+        if any(x in low for x in (
+            "/assets/", "/_next/", ".webp", ".png", ".jpg", ".jpeg",
+            ".svg", ".gif", ".css", ".js", ".ico", ".woff", ".woff2"
+        )):
+            return False
+        if value.startswith("http") and not value.startswith(base):
+            return False
+        return any(k in low for k in (
+            "soccer", "football", "sport", "event",
+            "premier-league", "champions-league", "laliga"
+        ))
+
     try:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(15.0),
@@ -518,11 +539,7 @@ async def discover_supabets_public_routes():
                     value_end = html.find(quote, value_start + 1)
                     if value_end > value_start:
                         href = html[value_start + 1:value_end]
-                        low = href.lower()
-                        if any(k in low for k in (
-                            "soccer", "football", "sport", "event",
-                            "premier-league", "champions-league", "laliga"
-                        )):
+                        if is_route_candidate(href):
                             full = urljoin(base, href)
                             if full not in seen:
                                 seen.add(full)
@@ -530,8 +547,86 @@ async def discover_supabets_public_routes():
                     pos = value_end + 1 if value_end > value_start else value_start + 1
                 else:
                     pos = value_start + 1
-
             result["route_candidates"] = routes[:80]
+
+            scripts = []
+            pos = 0
+            while True:
+                start_tag = html.lower().find("<script", pos)
+                if start_tag < 0:
+                    break
+                end_tag = html.find(">", start_tag)
+                if end_tag < 0:
+                    break
+                tag = html[start_tag:end_tag + 1]
+                low_tag = tag.lower()
+                src_pos = low_tag.find("src=")
+                if src_pos >= 0:
+                    value_start = src_pos + 4
+                    while value_start < len(tag) and tag[value_start].isspace():
+                        value_start += 1
+                    if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                        quote = tag[value_start]
+                        value_end = tag.find(quote, value_start + 1)
+                        if value_end > value_start:
+                            src = urljoin(base, tag[value_start + 1:value_end])
+                            if src not in scripts:
+                                scripts.append(src)
+                pos = end_tag + 1
+
+            script_routes = []
+            script_seen = set()
+            tokens = (
+                "/sports/", "/sport/", "/soccer/", "/football/",
+                "/event/", "/events/", "premier-league",
+                "champions-league", "laliga"
+            )
+
+            for src in scripts[:40]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 3500000:
+                        continue
+                    result["scripts_scanned"] += 1
+
+                    lower = text.lower()
+                    for token in tokens:
+                        search_from = 0
+                        hits = 0
+                        while hits < 25:
+                            idx = lower.find(token, search_from)
+                            if idx < 0:
+                                break
+
+                            left_quote = -1
+                            quote_char = ""
+                            j = idx - 1
+                            while j >= max(0, idx - 220):
+                                if text[j] in ('"', "'", "`"):
+                                    left_quote = j
+                                    quote_char = text[j]
+                                    break
+                                j -= 1
+
+                            if left_quote >= 0:
+                                right_quote = text.find(quote_char, idx)
+                                if right_quote > idx and right_quote - left_quote <= 420:
+                                    value = text[left_quote + 1:right_quote].replace("\\/", "/")
+                                    if is_route_candidate(value):
+                                        full = urljoin(base, value)
+                                        if full not in script_seen:
+                                            script_seen.add(full)
+                                            script_routes.append(full)
+
+                            search_from = idx + len(token)
+                            hits += 1
+                except Exception:
+                    continue
+
+            result["script_route_candidates"] = script_routes[:100]
     except Exception as exc:
         result["errors"].append(
             f"Supabets public route discovery failed: {type(exc).__name__}: {exc}"
