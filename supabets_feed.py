@@ -687,20 +687,26 @@ async def probe_supabets_sport_client_calls():
     try:
         import re
         from urllib.parse import urljoin
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0),follow_redirects=True,headers={"User-Agent":"Mozilla/5.0"}) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"}
+        ) as client:
             r=await client.get(base)
             r.raise_for_status()
             result["reachable"]=True
             html=r.text or ""
             scripts=[]
-            for m in re.findall(r'<script[^>]+src=["\\\']([^"\\\']+)["\\\']',html,re.I):
+            for m in re.findall(r"<script[^>]+src=[\"']([^\"']+)[\"']", html, re.I):
                 src=urljoin(base,m)
                 if src not in scripts:
                     scripts.append(src)
-            calls=[]; seen=set()
+
+            calls=[]
+            seen=set()
             patterns=[
-                r"sportB2CApi\\.(get|post|put|delete)\\(\\s*[\"']([^\"']{1,260})[\"']",
-                r"sportB2CApi\\.(get|post|put|delete)\\(\\s*`([^`]{1,320})`"
+                re.compile(r"sportB2CApi\.(get|post|put|delete)\(\s*[\"']([^\"']{1,260})[\"']", re.I),
+                re.compile(r"sportB2CApi\.(get|post|put|delete)\(\s*`([^`]{1,320})`", re.I),
             ]
             for src in scripts[:40]:
                 try:
@@ -712,15 +718,22 @@ async def probe_supabets_sport_client_calls():
                         continue
                     result["scripts_scanned"]+=1
                     for pat in patterns:
-                        for m in re.finditer(pat,text,re.I):
-                            method=m.group(1).upper(); path=m.group(2).replace("\\/","/")
+                        for m in pat.finditer(text):
+                            method=m.group(1).upper()
+                            path=m.group(2).replace("\\/","/")
                             key=(method,path)
                             if key in seen:
                                 continue
                             seen.add(key)
-                            a=max(0,m.start()-260); b=min(len(text),m.end()+420)
+                            a=max(0,m.start()-260)
+                            b=min(len(text),m.end()+420)
                             context=" ".join(text[a:b].replace("\r"," ").replace("\n"," ").split())
-                            calls.append({"method":method,"path":path,"script":src.rsplit("/",1)[-1],"context":context[:900]})
+                            calls.append({
+                                "method":method,
+                                "path":path,
+                                "script":src.rsplit("/",1)[-1],
+                                "context":context[:900]
+                            })
             result["sport_client_calls"]=calls[:120]
     except Exception as exc:
         result["errors"].append(f"Sport client call probe failed: {type(exc).__name__}: {exc}")
