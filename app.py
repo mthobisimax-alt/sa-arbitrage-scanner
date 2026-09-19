@@ -10,7 +10,7 @@ from feeds import fetch_all_feeds, fetch_oddspapi_account
 from sgo_feed import fetch_sportsgameodds_fixed
 from supabets_feed import probe_supabets, probe_supabets_new_site, probe_supabets_bundle_context, probe_supabets_public_sports_api, probe_supabets_soccer_program, probe_supabets_soccer_groups, probe_supabets_event_api_paths
 # Supabets diagnostic probe v2
-from supabets_event_probe import discover_supabets_sport_calls, fetch_supabets_soccer_event_samples, discover_supabets_event_detail_calls, discover_supabets_b2c_betting_paths, discover_supabets_public_routes, discover_supabets_sports_page_calls
+from supabets_event_probe import discover_supabets_sport_calls, fetch_supabets_soccer_event_samples, discover_supabets_event_detail_calls, discover_supabets_b2c_betting_paths, discover_supabets_public_routes, discover_supabets_sports_page_calls, probe_supabets_event_endpoint_candidates
 
 with open("config.json") as f: CFG=json.load(f)
 app=FastAPI(title="SA Arb Scanner Web"); templates=Jinja2Templates(directory=".")
@@ -221,6 +221,10 @@ async def supabets_sports_page_paths_only():
             "api_paths":[item.get("path") for item in page.get("api_paths",[]) if item.get("path")]
         })
     return JSONResponse({"provider":result.get("provider"),"pages":pages,"errors":result.get("errors",[])})
+
+@app.get("/api/supabets-event-endpoint-candidates-test")
+async def supabets_event_endpoint_candidates_test():
+    return JSONResponse(await probe_supabets_event_endpoint_candidates())
 
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
