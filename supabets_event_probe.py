@@ -783,3 +783,66 @@ async def discover_supabets_sports_page_calls():
         )
 
     return result
+
+
+async def probe_supabets_event_endpoint_candidates():
+    base = "https://apib2c.supabets.co.za"
+    event_id = 990625
+    headers = {
+        "x-api-key": "H3DigitalAPIB2CWebsiteUser",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Origin": "https://new.supabets.co.za",
+        "Referer": "https://new.supabets.co.za/",
+        "User-Agent": "Mozilla/5.0",
+    }
+    candidates = [
+        f"/api/b2c/EventsProgram/event?eventId={event_id}",
+        f"/api/b2c/EventsProgram/events?eventId={event_id}",
+        f"/api/b2c/EventsProgram/subevents?eventId={event_id}",
+        f"/api/b2c/EventsProgram/sub-events?eventId={event_id}",
+        f"/api/b2c/EventsProgram/program?eventId={event_id}",
+        f"/api/b2c/EventsProgram/event/{event_id}",
+        f"/api/b2c/EventsProgram/events/{event_id}",
+        f"/api/b2c/EventsProgram/subevents/{event_id}",
+    ]
+    result = {
+        "provider": "Supabets Public Sports API",
+        "eventId": event_id,
+        "probes": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(12.0),
+            follow_redirects=True,
+            headers=headers,
+        ) as client:
+            for path in candidates:
+                item = {"path": path, "status": None, "content_type": "", "json_type": "", "top_level_keys": [], "preview": ""}
+                try:
+                    response = await client.get(base + path)
+                    item["status"] = response.status_code
+                    item["content_type"] = str(response.headers.get("content-type") or "")
+                    body = (response.text or "").strip()
+                    if "application/json" in item["content_type"].lower():
+                        try:
+                            data = response.json()
+                            item["json_type"] = type(data).__name__
+                            if isinstance(data, dict):
+                                item["top_level_keys"] = list(data.keys())[:30]
+                                item["preview"] = str({k:data.get(k) for k in item["top_level_keys"][:4]})[:420]
+                            elif isinstance(data, list):
+                                item["preview"] = f"list[{len(data)}]"
+                        except Exception:
+                            item["preview"] = body[:220]
+                    else:
+                        item["preview"] = " ".join(body.replace("\r"," ").replace("\n"," ").split())[:220]
+                except Exception as exc:
+                    item["error"] = f"{type(exc).__name__}: {exc}"
+                result["probes"].append(item)
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets event endpoint probe failed: {type(exc).__name__}: {exc}"
+        )
+    return result
