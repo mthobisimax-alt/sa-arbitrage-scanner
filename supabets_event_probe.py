@@ -1997,3 +1997,134 @@ async def inspect_supabets_fixtures_page():
             f"Supabets fixtures page inspection failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def inspect_supabets_unique_fixtures_chunks():
+    home_url = "https://new.supabets.co.za/"
+    fixtures_url = "https://new.supabets.co.za/fixtures"
+    result = {
+        "provider": "Supabets New Site",
+        "home_status": None,
+        "fixtures_status": None,
+        "home_script_count": 0,
+        "fixtures_script_count": 0,
+        "unique_fixture_scripts": [],
+        "unique_chunk_findings": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as client:
+            home = await client.get(home_url)
+            fixtures = await client.get(fixtures_url)
+            result["home_status"] = home.status_code
+            result["fixtures_status"] = fixtures.status_code
+            home.raise_for_status()
+            fixtures.raise_for_status()
+
+            home_scripts = extract_scripts(home.text or "", str(home.url))
+            fixture_scripts = extract_scripts(fixtures.text or "", str(fixtures.url))
+            result["home_script_count"] = len(home_scripts)
+            result["fixtures_script_count"] = len(fixture_scripts)
+
+            unique = [s for s in fixture_scripts if s not in set(home_scripts)]
+            result["unique_fixture_scripts"] = [s.rsplit("/",1)[-1] for s in unique]
+
+            findings = []
+            needles = (
+                "/api/",
+                "apib2c.supabets.co.za",
+                "supaskins-backend.azurewebsites.net",
+                "fixture",
+                "fixtures",
+                "market",
+                "odds",
+                "eventId",
+                "subEvent",
+                "sportB2CApi",
+            )
+
+            for src in unique[:30]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 5000000:
+                        continue
+                    lower = text.lower()
+                    chunk = {
+                        "script": src.rsplit("/",1)[-1],
+                        "size": len(text),
+                        "matches": [],
+                    }
+
+                    for needle in needles:
+                        search_from = 0
+                        hits = 0
+                        needle_lower = needle.lower()
+                        while hits < 8:
+                            idx = lower.find(needle_lower, search_from)
+                            if idx < 0:
+                                break
+                            left = max(0, idx - 900)
+                            right = min(len(text), idx + 1800)
+                            context = " ".join(
+                                text[left:right].replace("\r"," ").replace("\n"," ").split()
+                            )
+                            chunk["matches"].append({
+                                "needle": needle,
+                                "index": idx,
+                                "context": context[:2200],
+                            })
+                            search_from = idx + len(needle_lower)
+                            hits += 1
+
+                    if chunk["matches"]:
+                        findings.append(chunk)
+
+                except Exception as exc:
+                    findings.append({
+                        "script": src.rsplit("/",1)[-1],
+                        "error": f"{type(exc).__name__}: {exc}",
+                    })
+
+            result["unique_chunk_findings"] = findings[:30]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets unique fixtures chunk inspection failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
