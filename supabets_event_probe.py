@@ -846,3 +846,102 @@ async def probe_supabets_event_endpoint_candidates():
             f"Supabets event endpoint probe failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def inspect_supabets_competition_object():
+    url = "https://apib2c.supabets.co.za/api/b2c/EventsProgram/program?sportId=163"
+    headers = {
+        "x-api-key": "H3DigitalAPIB2CWebsiteUser",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Origin": "https://new.supabets.co.za",
+        "Referer": "https://new.supabets.co.za/",
+        "User-Agent": "Mozilla/5.0",
+    }
+    target_event_id = 990625
+    result = {
+        "provider": "Supabets Public Sports API",
+        "target_eventId": target_event_id,
+        "status": None,
+        "competition": None,
+        "field_summary": {},
+        "nested_samples": {},
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0),
+            follow_redirects=True,
+            headers=headers,
+        ) as client:
+            response = await client.get(url)
+            result["status"] = response.status_code
+            response.raise_for_status()
+            payload = response.json()
+            data = payload.get("data") if isinstance(payload, dict) else payload
+            if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+                result["errors"].append("Unexpected soccer program structure")
+                return result
+
+            groups = data[0].get("groups") or []
+            target = None
+            target_group = None
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                for event in group.get("events") or []:
+                    if isinstance(event, dict) and event.get("eventId") == target_event_id:
+                        target = event
+                        target_group = group.get("name")
+                        break
+                if target:
+                    break
+
+            if not target:
+                result["errors"].append("Target eventId not found in soccer program")
+                return result
+
+            compact = {"group": target_group}
+            summary = {}
+            nested = {}
+
+            for key, value in target.items():
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    compact[key] = value
+                    summary[key] = type(value).__name__
+                elif isinstance(value, list):
+                    summary[key] = f"list[{len(value)}]"
+                    if value:
+                        sample = value[0]
+                        if isinstance(sample, dict):
+                            nested[key] = {
+                                "sample_keys": list(sample.keys())[:60],
+                                "sample_item": {
+                                    k: sample.get(k)
+                                    for k in list(sample.keys())[:20]
+                                    if isinstance(sample.get(k), (str, int, float, bool)) or sample.get(k) is None
+                                },
+                            }
+                        else:
+                            nested[key] = {"sample": sample}
+                elif isinstance(value, dict):
+                    summary[key] = f"dict[{len(value)}]"
+                    nested[key] = {
+                        "keys": list(value.keys())[:60],
+                        "sample": {
+                            k: value.get(k)
+                            for k in list(value.keys())[:20]
+                            if isinstance(value.get(k), (str, int, float, bool)) or value.get(k) is None
+                        },
+                    }
+                else:
+                    summary[key] = type(value).__name__
+
+            result["competition"] = compact
+            result["field_summary"] = summary
+            result["nested_samples"] = nested
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets competition inspection failed: {type(exc).__name__}: {exc}"
+        )
+    return result
