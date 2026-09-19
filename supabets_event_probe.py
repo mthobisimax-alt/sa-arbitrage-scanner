@@ -482,3 +482,58 @@ async def discover_supabets_b2c_betting_paths():
             f"Supabets B2C betting path discovery failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def discover_supabets_public_routes():
+    base = "https://new.supabets.co.za/"
+    result = {
+        "provider": "Supabets New Site",
+        "reachable": False,
+        "route_candidates": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as client:
+            page = await client.get(base)
+            page.raise_for_status()
+            result["reachable"] = True
+            html = page.text or ""
+
+            routes = []
+            seen = set()
+            pos = 0
+            while True:
+                href_pos = html.lower().find("href=", pos)
+                if href_pos < 0:
+                    break
+                value_start = href_pos + 5
+                while value_start < len(html) and html[value_start].isspace():
+                    value_start += 1
+                if value_start < len(html) and html[value_start] in ('"', "'"):
+                    quote = html[value_start]
+                    value_end = html.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        href = html[value_start + 1:value_end]
+                        low = href.lower()
+                        if any(k in low for k in (
+                            "soccer", "football", "sport", "event",
+                            "premier-league", "champions-league", "laliga"
+                        )):
+                            full = urljoin(base, href)
+                            if full not in seen:
+                                seen.add(full)
+                                routes.append(full)
+                    pos = value_end + 1 if value_end > value_start else value_start + 1
+                else:
+                    pos = value_start + 1
+
+            result["route_candidates"] = routes[:80]
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets public route discovery failed: {type(exc).__name__}: {exc}"
+        )
+    return result
