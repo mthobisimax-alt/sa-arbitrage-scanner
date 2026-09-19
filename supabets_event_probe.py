@@ -1391,3 +1391,120 @@ async def inspect_supabets_sport_client_raw():
             f"Supabets raw sport-client inspection failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def inspect_supabets_sport_client_module():
+    base = "https://new.supabets.co.za/"
+    result = {
+        "provider": "Supabets New Site",
+        "reachable": False,
+        "scripts_scanned": 0,
+        "modules": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as client:
+            page = await client.get(base)
+            page.raise_for_status()
+            result["reachable"] = True
+            html = page.text or ""
+
+            scripts = []
+            pos = 0
+            while True:
+                start = html.lower().find("<script", pos)
+                if start < 0:
+                    break
+                end = html.find(">", start)
+                if end < 0:
+                    break
+                tag = html[start:end + 1]
+                low = tag.lower()
+                src_pos = low.find("src=")
+                if src_pos >= 0:
+                    value_start = src_pos + 4
+                    while value_start < len(tag) and tag[value_start].isspace():
+                        value_start += 1
+                    if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                        quote = tag[value_start]
+                        value_end = tag.find(quote, value_start + 1)
+                        if value_end > value_start:
+                            src = urljoin(base, tag[value_start + 1:value_end])
+                            if src not in scripts:
+                                scripts.append(src)
+                pos = end + 1
+
+            found = []
+            seen = set()
+            needle = "sportB2CApi"
+
+            for src in scripts[:50]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 5000000:
+                        continue
+                    result["scripts_scanned"] += 1
+
+                    search_from = 0
+                    hits = 0
+                    while hits < 20:
+                        idx = text.find(needle, search_from)
+                        if idx < 0:
+                            break
+
+                        left = max(0, idx - 1200)
+                        right = min(len(text), idx + 7000)
+                        block = text[left:right]
+
+                        api_paths = []
+                        p = 0
+                        while True:
+                            api_idx = block.find("/api/b2c/", p)
+                            if api_idx < 0:
+                                break
+                            api_end = api_idx
+                            while api_end < len(block) and api_end - api_idx < 500:
+                                ch = block[api_end]
+                                if api_end > api_idx and ch in ('"', "'", "`", " ", "\n", "\r", "\\"):
+                                    # allow escaped slash but stop at escaped quote
+                                    if ch == "\\" and api_end + 1 < len(block) and block[api_end + 1] == "/":
+                                        api_end += 2
+                                        continue
+                                    break
+                                api_end += 1
+                            path = block[api_idx:api_end].replace("\\/", "/")
+                            if path and path not in api_paths:
+                                api_paths.append(path)
+                            p = api_idx + 8
+
+                        compact = " ".join(
+                            block.replace("\r", " ").replace("\n", " ").split()
+                        )
+                        key = (src.rsplit("/",1)[-1], idx)
+                        if key not in seen:
+                            seen.add(key)
+                            found.append({
+                                "script": src.rsplit("/",1)[-1],
+                                "index": idx,
+                                "api_paths_nearby": api_paths[:40],
+                                "context": compact[:6500],
+                            })
+
+                        search_from = idx + len(needle)
+                        hits += 1
+                except Exception:
+                    continue
+
+            result["modules"] = found[:30]
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets sport-client module inspection failed: {type(exc).__name__}: {exc}"
+        )
+    return result
