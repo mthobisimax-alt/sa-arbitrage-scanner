@@ -10,6 +10,7 @@ from feeds import fetch_all_feeds, fetch_oddspapi_account
 from sgo_feed import fetch_sportsgameodds_fixed
 from supabets_feed import probe_supabets, probe_supabets_new_site, probe_supabets_bundle_context, probe_supabets_public_sports_api, probe_supabets_soccer_program, probe_supabets_soccer_groups, probe_supabets_event_api_paths
 # Supabets diagnostic probe v2
+from supabets_event_probe import discover_supabets_sport_calls
 
 with open("config.json") as f: CFG=json.load(f)
 app=FastAPI(title="SA Arb Scanner Web"); templates=Jinja2Templates(directory=".")
@@ -170,6 +171,10 @@ async def supabets_soccer_groups_test():
 @app.get("/api/supabets-event-api-paths-test")
 async def supabets_event_api_paths_test():
     return JSONResponse(await probe_supabets_event_api_paths())
+
+@app.get("/api/supabets-isolated-event-probe")
+async def supabets_isolated_event_probe():
+    return JSONResponse(await discover_supabets_sport_calls())
 
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
