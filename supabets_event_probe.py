@@ -1,4 +1,3 @@
-import re
 from urllib.parse import urljoin
 import httpx
 
@@ -23,10 +22,29 @@ async def discover_supabets_sport_calls():
             html = page.text or ""
 
             scripts = []
-            for match in re.finditer(r'<script[^>]+src=["\\']([^"\\']+)["\\']', html, re.I):
-                src = urljoin(base, match.group(1))
-                if src not in scripts:
-                    scripts.append(src)
+            pos = 0
+            while True:
+                start = html.lower().find("<script", pos)
+                if start < 0:
+                    break
+                end = html.find(">", start)
+                if end < 0:
+                    break
+                tag = html[start:end + 1]
+                low = tag.lower()
+                src_pos = low.find("src=")
+                if src_pos >= 0:
+                    value_start = src_pos + 4
+                    while value_start < len(tag) and tag[value_start].isspace():
+                        value_start += 1
+                    if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                        quote = tag[value_start]
+                        value_end = tag.find(quote, value_start + 1)
+                        if value_end > value_start:
+                            src = urljoin(base, tag[value_start + 1:value_end])
+                            if src not in scripts:
+                                scripts.append(src)
+                pos = end + 1
 
             needles = (
                 "sportB2CApi.get(",
@@ -48,12 +66,11 @@ async def discover_supabets_sport_calls():
                     result["scripts_scanned"] += 1
 
                     for needle in needles:
-                        pos = 0
+                        search_from = 0
                         while True:
-                            idx = text.find(needle, pos)
+                            idx = text.find(needle, search_from)
                             if idx < 0:
                                 break
-
                             method = needle.split(".", 1)[1].split("(", 1)[0].upper()
                             arg_start = idx + len(needle)
                             while arg_start < len(text) and text[arg_start].isspace():
@@ -62,9 +79,9 @@ async def discover_supabets_sport_calls():
                             path = ""
                             if arg_start < len(text) and text[arg_start] in ('"', "'", "`"):
                                 quote = text[arg_start]
-                                end = text.find(quote, arg_start + 1)
-                                if end > arg_start:
-                                    path = text[arg_start + 1:end].replace("\\/", "/")
+                                value_end = text.find(quote, arg_start + 1)
+                                if value_end > arg_start:
+                                    path = text[arg_start + 1:value_end].replace("\\/", "/")
 
                             if path:
                                 key = (method, path)
@@ -78,16 +95,13 @@ async def discover_supabets_sport_calls():
                                         .replace("\n", " ")
                                         .split()
                                     )
-                                    calls.append(
-                                        {
-                                            "method": method,
-                                            "path": path,
-                                            "script": src.rsplit("/", 1)[-1],
-                                            "context": context[:1100],
-                                        }
-                                    )
-
-                            pos = idx + len(needle)
+                                    calls.append({
+                                        "method": method,
+                                        "path": path,
+                                        "script": src.rsplit("/", 1)[-1],
+                                        "context": context[:1100],
+                                    })
+                            search_from = idx + len(needle)
                 except Exception:
                     continue
 
@@ -96,5 +110,4 @@ async def discover_supabets_sport_calls():
         result["errors"].append(
             f"Supabets sport call discovery failed: {type(exc).__name__}: {exc}"
         )
-
     return result
