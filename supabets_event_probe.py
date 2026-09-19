@@ -1861,3 +1861,139 @@ async def inspect_supabets_fixtures_route_context():
             f"Supabets fixtures route inspection failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def inspect_supabets_fixtures_page():
+    url = "https://new.supabets.co.za/fixtures"
+    result = {
+        "provider": "Supabets New Site",
+        "url": url,
+        "status": None,
+        "final_url": None,
+        "script_count": 0,
+        "scripts_scanned": 0,
+        "api_paths": [],
+        "interesting_contexts": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as client:
+            page = await client.get(url)
+            result["status"] = page.status_code
+            result["final_url"] = str(page.url)
+            page.raise_for_status()
+            html = page.text or ""
+
+            scripts = []
+            pos = 0
+            while True:
+                start = html.lower().find("<script", pos)
+                if start < 0:
+                    break
+                end = html.find(">", start)
+                if end < 0:
+                    break
+                tag = html[start:end + 1]
+                low = tag.lower()
+                src_pos = low.find("src=")
+                if src_pos >= 0:
+                    value_start = src_pos + 4
+                    while value_start < len(tag) and tag[value_start].isspace():
+                        value_start += 1
+                    if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                        quote = tag[value_start]
+                        value_end = tag.find(quote, value_start + 1)
+                        if value_end > value_start:
+                            src = urljoin(str(page.url), tag[value_start + 1:value_end])
+                            if src not in scripts:
+                                scripts.append(src)
+                pos = end + 1
+
+            result["script_count"] = len(scripts)
+
+            api_seen = set()
+            ctx_seen = set()
+            contexts = []
+            api_paths = []
+
+            tokens = (
+                "/api/b2c/",
+                "sportB2CApi",
+                "fixture",
+                "fixtures",
+                "market",
+                "odds",
+                "eventId",
+                "subEvent",
+            )
+
+            for src in scripts[:60]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 5000000:
+                        continue
+                    result["scripts_scanned"] += 1
+                    lower = text.lower()
+
+                    p = 0
+                    while True:
+                        idx = text.find("/api/b2c/", p)
+                        if idx < 0:
+                            break
+                        end_idx = idx
+                        while end_idx < len(text) and end_idx - idx < 700:
+                            ch = text[end_idx]
+                            if end_idx > idx and ch in ('"', "'", "`", " ", "\n", "\r"):
+                                break
+                            end_idx += 1
+                        path = text[idx:end_idx].replace("\\/", "/")
+                        if path and path not in api_seen:
+                            api_seen.add(path)
+                            api_paths.append({
+                                "path": path,
+                                "script": src.rsplit("/",1)[-1],
+                            })
+                        p = idx + 8
+
+                    for token in tokens:
+                        needle = token.lower()
+                        search_from = 0
+                        hits = 0
+                        while hits < 10:
+                            idx = lower.find(needle, search_from)
+                            if idx < 0:
+                                break
+                            left = max(0, idx - 1200)
+                            right = min(len(text), idx + 2600)
+                            snippet = " ".join(
+                                text[left:right].replace("\r"," ").replace("\n"," ").split()
+                            )
+                            if ("/api/b2c/" in snippet or "sportB2CApi" in snippet or
+                                "fixture" in snippet.lower() or "odds" in snippet.lower()):
+                                key = (src.rsplit("/",1)[-1], token, snippet[:220])
+                                if key not in ctx_seen:
+                                    ctx_seen.add(key)
+                                    contexts.append({
+                                        "token": token,
+                                        "script": src.rsplit("/",1)[-1],
+                                        "context": snippet[:3200],
+                                    })
+                            search_from = idx + len(needle)
+                            hits += 1
+                except Exception:
+                    continue
+
+            result["api_paths"] = api_paths[:120]
+            result["interesting_contexts"] = contexts[:80]
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets fixtures page inspection failed: {type(exc).__name__}: {exc}"
+        )
+    return result
