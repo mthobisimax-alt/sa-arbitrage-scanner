@@ -207,6 +207,21 @@ async def supabets_public_routes_test():
 async def supabets_sports_page_calls_test():
     return JSONResponse(await discover_supabets_sports_page_calls())
 
+@app.get("/api/supabets-sports-page-paths-only")
+async def supabets_sports_page_paths_only():
+    result=await discover_supabets_sports_page_calls()
+    pages=[]
+    for page in result.get("pages",[]):
+        pages.append({
+            "url":page.get("url"),
+            "status":page.get("status"),
+            "final_url":page.get("final_url"),
+            "script_count":page.get("script_count"),
+            "scripts_scanned":page.get("scripts_scanned"),
+            "api_paths":[item.get("path") for item in page.get("api_paths",[]) if item.get("path")]
+        })
+    return JSONResponse({"provider":result.get("provider"),"pages":pages,"errors":result.get("errors",[])})
+
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
 
