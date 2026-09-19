@@ -1292,3 +1292,102 @@ async def discover_supabets_sport_api_calls_escaped():
             f"Supabets escaped sport API discovery failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def inspect_supabets_sport_client_raw():
+    base = "https://new.supabets.co.za/"
+    result = {
+        "provider": "Supabets New Site",
+        "reachable": False,
+        "scripts_scanned": 0,
+        "matches": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as client:
+            page = await client.get(base)
+            page.raise_for_status()
+            result["reachable"] = True
+            html = page.text or ""
+
+            scripts = []
+            pos = 0
+            while True:
+                start = html.lower().find("<script", pos)
+                if start < 0:
+                    break
+                end = html.find(">", start)
+                if end < 0:
+                    break
+                tag = html[start:end + 1]
+                low = tag.lower()
+                src_pos = low.find("src=")
+                if src_pos >= 0:
+                    value_start = src_pos + 4
+                    while value_start < len(tag) and tag[value_start].isspace():
+                        value_start += 1
+                    if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                        quote = tag[value_start]
+                        value_end = tag.find(quote, value_start + 1)
+                        if value_end > value_start:
+                            src = urljoin(base, tag[value_start + 1:value_end])
+                            if src not in scripts:
+                                scripts.append(src)
+                pos = end + 1
+
+            needles = (
+                "sportB2CApi",
+                "EventsProgram/program?",
+                "EventsProgram/sports-full",
+                "apib2c.supabets.co.za",
+            )
+            seen = set()
+            matches = []
+
+            for src in scripts[:50]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 5000000:
+                        continue
+                    result["scripts_scanned"] += 1
+
+                    for needle in needles:
+                        search_from = 0
+                        hits = 0
+                        while hits < 12:
+                            idx = text.find(needle, search_from)
+                            if idx < 0:
+                                break
+                            left = max(0, idx - 700)
+                            right = min(len(text), idx + 1800)
+                            raw = text[left:right]
+                            compact = " ".join(
+                                raw.replace("\r", " ").replace("\n", " ").split()
+                            )
+                            key = (src.rsplit("/",1)[-1], needle, idx)
+                            if key not in seen:
+                                seen.add(key)
+                                matches.append({
+                                    "needle": needle,
+                                    "script": src.rsplit("/",1)[-1],
+                                    "index": idx,
+                                    "context": compact[:2200],
+                                })
+                            search_from = idx + len(needle)
+                            hits += 1
+                except Exception:
+                    continue
+
+            result["matches"] = matches[:80]
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets raw sport-client inspection failed: {type(exc).__name__}: {exc}"
+        )
+    return result
