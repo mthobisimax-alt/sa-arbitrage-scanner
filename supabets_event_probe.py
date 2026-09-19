@@ -157,6 +157,54 @@ async def discover_supabets_sport_calls():
                     continue
 
             result["api_path_occurrences"] = api_occurrences[:120]
+
+            eventsprogram_paths = []
+            eventsprogram_seen = set()
+            for src in scripts[:40]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 3500000:
+                        continue
+
+                    needle = "/api/b2c/EventsProgram/"
+                    search_from = 0
+                    while True:
+                        idx = text.find(needle, search_from)
+                        if idx < 0:
+                            break
+
+                        end = idx
+                        while end < len(text) and end - idx < 400:
+                            ch = text[end]
+                            if end > idx and ch in ('"', "'", "`"):
+                                break
+                            end += 1
+
+                        path = text[idx:end].replace("\\/", "/")
+                        if path and path not in eventsprogram_seen:
+                            eventsprogram_seen.add(path)
+                            left = max(0, idx - 180)
+                            right = min(len(text), idx + 800)
+                            context = " ".join(
+                                text[left:right]
+                                .replace("\r", " ")
+                                .replace("\n", " ")
+                                .split()
+                            )
+                            eventsprogram_paths.append({
+                                "path": path,
+                                "script": src.rsplit("/", 1)[-1],
+                                "context": context[:900],
+                            })
+
+                        search_from = idx + len(needle)
+                except Exception:
+                    continue
+
+            result["eventsprogram_paths"] = eventsprogram_paths[:80]
     except Exception as exc:
         result["errors"].append(
             f"Supabets sport call discovery failed: {type(exc).__name__}: {exc}"
