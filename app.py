@@ -176,6 +176,17 @@ async def supabets_event_api_paths_test():
 async def supabets_isolated_event_probe():
     return JSONResponse(await discover_supabets_sport_calls())
 
+@app.get("/api/supabets-eventsprogram-paths-test")
+async def supabets_eventsprogram_paths_test():
+    result=await discover_supabets_sport_calls()
+    return JSONResponse({
+        "provider":result.get("provider"),
+        "reachable":result.get("reachable"),
+        "scripts_scanned":result.get("scripts_scanned"),
+        "eventsprogram_paths":result.get("eventsprogram_paths",[]),
+        "errors":result.get("errors",[])
+    })
+
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
 
