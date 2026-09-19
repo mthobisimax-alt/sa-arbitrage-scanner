@@ -1169,3 +1169,126 @@ async def discover_supabets_odds_loader_tokens():
             f"Supabets odds-loader discovery failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def discover_supabets_sport_api_calls_escaped():
+    base = "https://new.supabets.co.za/"
+    result = {
+        "provider": "Supabets New Site",
+        "reachable": False,
+        "scripts_scanned": 0,
+        "calls": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as client:
+            page = await client.get(base)
+            page.raise_for_status()
+            result["reachable"] = True
+            html = page.text or ""
+
+            scripts = []
+            pos = 0
+            while True:
+                start = html.lower().find("<script", pos)
+                if start < 0:
+                    break
+                end = html.find(">", start)
+                if end < 0:
+                    break
+                tag = html[start:end + 1]
+                low = tag.lower()
+                src_pos = low.find("src=")
+                if src_pos >= 0:
+                    value_start = src_pos + 4
+                    while value_start < len(tag) and tag[value_start].isspace():
+                        value_start += 1
+                    if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                        quote = tag[value_start]
+                        value_end = tag.find(quote, value_start + 1)
+                        if value_end > value_start:
+                            src = urljoin(base, tag[value_start + 1:value_end])
+                            if src not in scripts:
+                                scripts.append(src)
+                pos = end + 1
+
+            calls = []
+            seen = set()
+            needle = "sportB2CApi."
+
+            for src in scripts[:50]:
+                try:
+                    response = await client.get(src)
+                    if response.status_code >= 400:
+                        continue
+                    text = response.text or ""
+                    if len(text) > 4500000:
+                        continue
+                    result["scripts_scanned"] += 1
+
+                    search_from = 0
+                    while True:
+                        idx = text.find(needle, search_from)
+                        if idx < 0:
+                            break
+
+                        method_start = idx + len(needle)
+                        method_end = method_start
+                        while method_end < len(text) and (text[method_end].isalpha() or text[method_end] == "_"):
+                            method_end += 1
+                        method = text[method_start:method_end]
+
+                        paren = text.find("(", method_end, min(len(text), method_end + 40))
+                        path = ""
+                        if paren >= 0:
+                            p = paren + 1
+                            while p < len(text) and (text[p].isspace() or text[p] == "\\"):
+                                p += 1
+                            if p < len(text) and text[p] in ('"', "'", "`"):
+                                quote = text[p]
+                                q = p + 1
+                                chars = []
+                                while q < len(text) and q - p < 500:
+                                    ch = text[q]
+                                    if ch == "\\" and q + 1 < len(text):
+                                        nxt = text[q + 1]
+                                        if nxt in ('"', "'", "`", "/", "\\"):
+                                            chars.append(nxt)
+                                            q += 2
+                                            continue
+                                    if ch == quote:
+                                        break
+                                    chars.append(ch)
+                                    q += 1
+                                path = "".join(chars)
+
+                        left = max(0, idx - 180)
+                        right = min(len(text), idx + 1100)
+                        context = " ".join(
+                            text[left:right].replace("\r"," ").replace("\n"," ").split()
+                        )
+
+                        key = (method, path, src.rsplit("/",1)[-1])
+                        if key not in seen:
+                            seen.add(key)
+                            calls.append({
+                                "method": method,
+                                "path": path,
+                                "script": src.rsplit("/",1)[-1],
+                                "context": context[:1300],
+                            })
+
+                        search_from = idx + len(needle)
+                except Exception:
+                    continue
+
+            result["calls"] = calls[:120]
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets escaped sport API discovery failed: {type(exc).__name__}: {exc}"
+        )
+    return result
