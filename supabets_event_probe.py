@@ -210,3 +210,65 @@ async def discover_supabets_sport_calls():
             f"Supabets sport call discovery failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def fetch_supabets_soccer_event_samples():
+    url = "https://apib2c.supabets.co.za/api/b2c/EventsProgram/program?sportId=163"
+    headers = {
+        "x-api-key": "H3DigitalAPIB2CWebsiteUser",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Origin": "https://new.supabets.co.za",
+        "Referer": "https://new.supabets.co.za/",
+        "User-Agent": "Mozilla/5.0",
+    }
+    result = {
+        "provider": "Supabets Public Sports API",
+        "status": None,
+        "event_samples": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0),
+            follow_redirects=True,
+            headers=headers,
+        ) as client:
+            response = await client.get(url)
+            result["status"] = response.status_code
+            response.raise_for_status()
+            payload = response.json()
+            data = payload.get("data") if isinstance(payload, dict) else payload
+            if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+                result["errors"].append("Unexpected soccer program structure")
+                return result
+
+            groups = data[0].get("groups") or []
+            samples = []
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                group_name = group.get("name")
+                events = group.get("events") or []
+                if not isinstance(events, list):
+                    continue
+                for event in events:
+                    if not isinstance(event, dict):
+                        continue
+                    samples.append({
+                        "group": group_name,
+                        "eventId": event.get("eventId"),
+                        "name": event.get("name"),
+                        "slug": event.get("slug"),
+                        "subEventsCount": event.get("subEventsCount"),
+                    })
+                    if len(samples) >= 20:
+                        break
+                if len(samples) >= 20:
+                    break
+            result["event_samples"] = samples
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets soccer event sample failed: {type(exc).__name__}: {exc}"
+        )
+    return result
