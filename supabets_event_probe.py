@@ -3378,3 +3378,143 @@ async def inspect_supabets_top_ranked_competition_script():
         )
 
     return result
+
+
+async def inspect_supabets_bitville_loader():
+    sports_url = "https://new.supabets.co.za/sports"
+    competition_url = "https://new.supabets.co.za/spa/sport/soccer/england/premier-league"
+    result = {
+        "provider": "Supabets New Site",
+        "competition_url": competition_url,
+        "target_script": None,
+        "bitville_urls": [],
+        "iframe_contexts": [],
+        "network_contexts": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            sports = await client.get(sports_url)
+            competition = await client.get(competition_url)
+            sports.raise_for_status()
+            competition.raise_for_status()
+
+            sports_scripts = set(extract_scripts(sports.text or "", str(sports.url)))
+            competition_scripts = extract_scripts(competition.text or "", str(competition.url))
+            unique = [s for s in competition_scripts if s not in sports_scripts]
+
+            # Locate the chunk that contains bitville and betting UI tokens.
+            target = None
+            for src in unique:
+                try:
+                    r = await client.get(src)
+                    if r.status_code >= 400:
+                        continue
+                    text = r.text or ""
+                    low = text.lower()
+                    if "bitville" in low and "stake" in low and "odds" in low:
+                        target = (src, text)
+                        break
+                except Exception:
+                    continue
+
+            if not target:
+                return result
+
+            src, text = target
+            result["target_script"] = src.rsplit("/",1)[-1]
+            lower = text.lower()
+
+            # Extract all absolute URLs containing likely sportsbook/game hosts.
+            urls = []
+            for scheme in ("https://","http://","wss://","ws://"):
+                pos = 0
+                while True:
+                    idx = text.find(scheme, pos)
+                    if idx < 0:
+                        break
+                    end = idx
+                    while end < len(text) and end - idx < 800 and text[end] not in ('"', "'", "`", " ", "\n", "\r", "\\", ")", "}"):
+                        end += 1
+                    url = text[idx:end]
+                    if url and url not in urls:
+                        urls.append(url)
+                    pos = idx + len(scheme)
+
+            result["bitville_urls"] = [
+                u for u in urls
+                if any(k in u.lower() for k in ("bitville","advbet","game","sport","bet"))
+            ][:80]
+
+            iframe_contexts = []
+            for needle in ("iframe","src:","src=","postMessage"):
+                pos = 0
+                hits = 0
+                while hits < 12:
+                    idx = lower.find(needle.lower(), pos)
+                    if idx < 0:
+                        break
+                    left=max(0,idx-1800)
+                    right=min(len(text),idx+4200)
+                    context=" ".join(text[left:right].replace("\r"," ").replace("\n"," ").split())
+                    if any(k in context.lower() for k in ("bitville","advbet","game","market","odds","stake")):
+                        iframe_contexts.append({"token":needle,"index":idx,"context":context[:5200]})
+                    pos=idx+len(needle)
+                    hits+=1
+            result["iframe_contexts"] = iframe_contexts[:40]
+
+            network_contexts=[]
+            for needle in ("fetch(", ".get(", ".post(", "axios", "XMLHttpRequest", "WebSocket", "wss://"):
+                pos=0
+                hits=0
+                while hits<16:
+                    idx=lower.find(needle.lower(),pos)
+                    if idx<0:
+                        break
+                    left=max(0,idx-2200)
+                    right=min(len(text),idx+5200)
+                    context=" ".join(text[left:right].replace("\r"," ").replace("\n"," ").split())
+                    if any(k in context.lower() for k in ("bitville","advbet","game","market","odds","stake","selection")):
+                        network_contexts.append({"token":needle,"index":idx,"context":context[:6200]})
+                    pos=idx+len(needle)
+                    hits+=1
+            result["network_contexts"]=network_contexts[:60]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets Bitville loader inspection failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
