@@ -2890,3 +2890,136 @@ async def inspect_supabets_sports_route_literals():
         )
 
     return result
+
+
+async def inspect_supabets_competition_page():
+    sports_url = "https://new.supabets.co.za/sports"
+    competition_url = "https://new.supabets.co.za/spa/sport/soccer/england/premier-league"
+    result = {
+        "provider": "Supabets New Site",
+        "sports_url": sports_url,
+        "competition_url": competition_url,
+        "sports_status": None,
+        "competition_status": None,
+        "competition_final_url": None,
+        "sports_script_count": 0,
+        "competition_script_count": 0,
+        "unique_competition_scripts": [],
+        "findings": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            sports = await client.get(sports_url)
+            competition = await client.get(competition_url)
+            result["sports_status"] = sports.status_code
+            result["competition_status"] = competition.status_code
+            result["competition_final_url"] = str(competition.url)
+            sports.raise_for_status()
+            competition.raise_for_status()
+
+            sports_scripts = set(extract_scripts(sports.text or "", str(sports.url)))
+            competition_scripts = extract_scripts(competition.text or "", str(competition.url))
+            result["sports_script_count"] = len(sports_scripts)
+            result["competition_script_count"] = len(competition_scripts)
+
+            unique = [s for s in competition_scripts if s not in sports_scripts]
+            result["unique_competition_scripts"] = [s.rsplit("/",1)[-1] for s in unique]
+
+            needles = (
+                "http://","https://","baseURL","axios","fetch(",
+                "/api/","/api/b2c/","sportB2CApi",
+                "eventId","subEvent","subevent","market","odds",
+                "fixture","fixtures","sportId","groupId","competition",
+                "EventsProgram","990625","premier-league"
+            )
+
+            findings = []
+            for src in unique[:30]:
+                try:
+                    r = await client.get(src)
+                    if r.status_code >= 400:
+                        continue
+                    text = r.text or ""
+                    if len(text) > 5000000:
+                        continue
+                    lower = text.lower()
+                    item = {
+                        "script": src.rsplit("/",1)[-1],
+                        "size": len(text),
+                        "tokens_found": [],
+                        "contexts": [],
+                    }
+
+                    for needle in needles:
+                        needle_lower = needle.lower()
+                        count = lower.count(needle_lower)
+                        if count:
+                            item["tokens_found"].append({"token":needle,"count":count})
+                            search_from = 0
+                            hits = 0
+                            while hits < 10:
+                                idx = lower.find(needle_lower, search_from)
+                                if idx < 0:
+                                    break
+                                left=max(0,idx-1200)
+                                right=min(len(text),idx+3000)
+                                context=" ".join(
+                                    text[left:right].replace("\r"," ").replace("\n"," ").split()
+                                )
+                                item["contexts"].append({
+                                    "token":needle,
+                                    "index":idx,
+                                    "context":context[:3500],
+                                })
+                                search_from=idx+len(needle_lower)
+                                hits += 1
+
+                    if item["tokens_found"]:
+                        findings.append(item)
+                except Exception as exc:
+                    findings.append({
+                        "script":src.rsplit("/",1)[-1],
+                        "error":f"{type(exc).__name__}: {exc}",
+                    })
+
+            result["findings"] = findings[:40]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets competition-page inspection failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
