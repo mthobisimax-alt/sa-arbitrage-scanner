@@ -11,7 +11,7 @@ from sgo_feed import fetch_sportsgameodds_fixed
 from supabets_feed import probe_supabets, probe_supabets_new_site, probe_supabets_bundle_context, probe_supabets_public_sports_api, probe_supabets_soccer_program, probe_supabets_soccer_groups, probe_supabets_event_api_paths
 # Supabets diagnostic probe v2
 from supabets_marketws_probe import probe_supabets_marketws
-from supabets_event_probe import discover_supabets_sport_calls, fetch_supabets_soccer_event_samples, discover_supabets_event_detail_calls, discover_supabets_b2c_betting_paths, discover_supabets_public_routes, discover_supabets_sports_page_calls, probe_supabets_event_endpoint_candidates, inspect_supabets_competition_object, discover_supabets_subevent_loader, discover_supabets_odds_loader_tokens, discover_supabets_sport_api_calls_escaped, inspect_supabets_sport_client_raw, inspect_supabets_sport_client_module, inspect_supabets_eventsprogram_module, inspect_supabets_api_clients, inspect_supabets_fixtures_route_context, inspect_supabets_fixtures_page, inspect_supabets_unique_fixtures_chunks, inspect_supabets_unique_fixture_chunk_deep, inspect_supabets_fixture_chunk_fetch_calls, inspect_supabets_unique_sports_chunks, inspect_supabets_sports_chunk_betting_tokens, inspect_supabets_event_card_click_logic, inspect_supabets_sports_route_literals, inspect_supabets_competition_page, inspect_supabets_competition_embed_logic, rank_supabets_competition_scripts, inspect_supabets_top_ranked_competition_script
+from supabets_event_probe import discover_supabets_sport_calls, fetch_supabets_soccer_event_samples, discover_supabets_event_detail_calls, discover_supabets_b2c_betting_paths, discover_supabets_public_routes, discover_supabets_sports_page_calls, probe_supabets_event_endpoint_candidates, inspect_supabets_competition_object, discover_supabets_subevent_loader, discover_supabets_odds_loader_tokens, discover_supabets_sport_api_calls_escaped, inspect_supabets_sport_client_raw, inspect_supabets_sport_client_module, inspect_supabets_eventsprogram_module, inspect_supabets_api_clients, inspect_supabets_fixtures_route_context, inspect_supabets_fixtures_page, inspect_supabets_unique_fixtures_chunks, inspect_supabets_unique_fixture_chunk_deep, inspect_supabets_fixture_chunk_fetch_calls, inspect_supabets_unique_sports_chunks, inspect_supabets_sports_chunk_betting_tokens, inspect_supabets_event_card_click_logic, inspect_supabets_sports_route_literals, inspect_supabets_competition_page, inspect_supabets_competition_embed_logic, rank_supabets_competition_scripts, inspect_supabets_top_ranked_competition_script, inspect_supabets_bitville_loader
 
 with open("config.json") as f: CFG=json.load(f)
 app=FastAPI(title="SA Arb Scanner Web"); templates=Jinja2Templates(directory=".")
@@ -314,6 +314,10 @@ async def supabets_competition_script_rank_test():
 @app.get("/api/supabets-top-ranked-script-test")
 async def supabets_top_ranked_script_test():
     return JSONResponse(await inspect_supabets_top_ranked_competition_script())
+
+@app.get("/api/supabets-bitville-loader-test")
+async def supabets_bitville_loader_test():
+    return JSONResponse(await inspect_supabets_bitville_loader())
 
 @app.get("/api/health")
 def health(): return {"ok":True,"service":"sa-arb-scanner-web","scan_state":latest.get("scan_state"),"scan_mode":"on_demand","fallback_available":fallback_available()}
