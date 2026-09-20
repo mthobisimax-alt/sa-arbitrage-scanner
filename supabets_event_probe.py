@@ -3023,3 +3023,119 @@ async def inspect_supabets_competition_page():
         )
 
     return result
+
+
+async def inspect_supabets_competition_embed_logic():
+    sports_url = "https://new.supabets.co.za/sports"
+    competition_url = "https://new.supabets.co.za/spa/sport/soccer/england/premier-league"
+    result = {
+        "provider": "Supabets New Site",
+        "competition_url": competition_url,
+        "unique_competition_scripts": [],
+        "findings": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            sports = await client.get(sports_url)
+            competition = await client.get(competition_url)
+            sports.raise_for_status()
+            competition.raise_for_status()
+
+            sports_scripts = set(extract_scripts(sports.text or "", str(sports.url)))
+            competition_scripts = extract_scripts(competition.text or "", str(competition.url))
+            unique = [s for s in competition_scripts if s not in sports_scripts]
+            result["unique_competition_scripts"] = [s.rsplit("/",1)[-1] for s in unique]
+
+            needles = (
+                "iframe","src:","src=","postMessage","window.","document.",
+                "script","widget","sportsbook","betting","prematch","live",
+                "socket","websocket","wss://","ws://","api.","https://","http://",
+                "MARKET_CONFIG","twoWay","threeWay","market","odd"
+            )
+
+            findings=[]
+            for src in unique[:30]:
+                try:
+                    r=await client.get(src)
+                    if r.status_code>=400:
+                        continue
+                    text=r.text or ""
+                    if len(text)>5000000:
+                        continue
+                    lower=text.lower()
+                    item={
+                        "script":src.rsplit("/",1)[-1],
+                        "size":len(text),
+                        "tokens_found":[],
+                        "contexts":[],
+                    }
+                    for needle in needles:
+                        n=needle.lower()
+                        count=lower.count(n)
+                        if not count:
+                            continue
+                        item["tokens_found"].append({"token":needle,"count":count})
+                        search_from=0
+                        hits=0
+                        while hits<8:
+                            idx=lower.find(n,search_from)
+                            if idx<0:
+                                break
+                            left=max(0,idx-1400)
+                            right=min(len(text),idx+3400)
+                            context=" ".join(
+                                text[left:right].replace("\r"," ").replace("\n"," ").split()
+                            )
+                            item["contexts"].append({
+                                "token":needle,
+                                "index":idx,
+                                "context":context[:4200],
+                            })
+                            search_from=idx+len(n)
+                            hits+=1
+                    if item["tokens_found"]:
+                        findings.append(item)
+                except Exception as exc:
+                    findings.append({
+                        "script":src.rsplit("/",1)[-1],
+                        "error":f"{type(exc).__name__}: {exc}",
+                    })
+            result["findings"]=findings[:50]
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets competition embed inspection failed: {type(exc).__name__}: {exc}"
+        )
+    return result
