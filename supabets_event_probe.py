@@ -2743,3 +2743,150 @@ async def inspect_supabets_event_card_click_logic():
         )
 
     return result
+
+
+async def inspect_supabets_sports_route_literals():
+    home_url = "https://new.supabets.co.za/"
+    sports_url = "https://new.supabets.co.za/sports"
+    result = {
+        "provider": "Supabets New Site",
+        "unique_sports_scripts": [],
+        "route_literals": [],
+        "router_contexts": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            home = await client.get(home_url)
+            sports = await client.get(sports_url)
+            home.raise_for_status()
+            sports.raise_for_status()
+
+            home_scripts = set(extract_scripts(home.text or "", str(home.url)))
+            sports_scripts = extract_scripts(sports.text or "", str(sports.url))
+            unique = [s for s in sports_scripts if s not in home_scripts]
+            result["unique_sports_scripts"] = [s.rsplit("/",1)[-1] for s in unique]
+
+            literals = []
+            literal_seen = set()
+            contexts = []
+            context_seen = set()
+
+            for src in unique[:20]:
+                try:
+                    r = await client.get(src)
+                    if r.status_code >= 400:
+                        continue
+                    text = r.text or ""
+                    if len(text) > 5000000:
+                        continue
+                    lower = text.lower()
+
+                    # Enumerate quoted route/query-like literals rather than generic array push().
+                    for quote in ('"', "'", "`"):
+                        pos = 0
+                        while True:
+                            start = text.find(quote, pos)
+                            if start < 0:
+                                break
+                            end = text.find(quote, start + 1)
+                            if end < 0:
+                                break
+                            if end - start <= 500:
+                                value = text[start + 1:end].replace("\\/", "/")
+                                low_value = value.lower()
+                                if (
+                                    value.startswith("/")
+                                    or value.startswith("?")
+                                    or "sportid" in low_value
+                                    or "eventid" in low_value
+                                    or "groupid" in low_value
+                                    or "subevent" in low_value
+                                ) and any(k in low_value for k in (
+                                    "sport", "event", "group", "subevent",
+                                    "fixture", "market", "odd", "league"
+                                )):
+                                    key = (src.rsplit("/",1)[-1], value)
+                                    if key not in literal_seen:
+                                        literal_seen.add(key)
+                                        literals.append({
+                                            "script": src.rsplit("/",1)[-1],
+                                            "value": value[:500],
+                                        })
+                            pos = end + 1
+
+                    for needle in ("useRouter", ".push(", "onClick:", "href:", "pathname:", "searchParams"):
+                        search_from = 0
+                        hits = 0
+                        needle_lower = needle.lower()
+                        while hits < 12:
+                            idx = lower.find(needle_lower, search_from)
+                            if idx < 0:
+                                break
+                            left = max(0, idx - 1800)
+                            right = min(len(text), idx + 3600)
+                            compact = " ".join(
+                                text[left:right].replace("\r"," ").replace("\n"," ").split()
+                            )
+                            if any(k in compact.lower() for k in (
+                                "sportid", "eventid", "groupid", "subevent",
+                                "/sports", "league", "event"
+                            )):
+                                key = (src.rsplit("/",1)[-1], needle, idx)
+                                if key not in context_seen:
+                                    context_seen.add(key)
+                                    contexts.append({
+                                        "token": needle,
+                                        "script": src.rsplit("/",1)[-1],
+                                        "index": idx,
+                                        "context": compact[:5000],
+                                    })
+                            search_from = idx + len(needle_lower)
+                            hits += 1
+                except Exception as exc:
+                    contexts.append({
+                        "script": src.rsplit("/",1)[-1],
+                        "error": f"{type(exc).__name__}: {exc}",
+                    })
+
+            result["route_literals"] = literals[:150]
+            result["router_contexts"] = contexts[:80]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets sports route-literal inspection failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
