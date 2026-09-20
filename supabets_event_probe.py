@@ -2245,3 +2245,104 @@ async def inspect_supabets_unique_fixture_chunk_deep():
         )
 
     return result
+
+
+async def inspect_supabets_fixture_chunk_fetch_calls():
+    home_url = "https://new.supabets.co.za/"
+    fixtures_url = "https://new.supabets.co.za/fixtures"
+    result = {
+        "provider": "Supabets New Site",
+        "unique_scripts": [],
+        "fetch_calls": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            home = await client.get(home_url)
+            fixtures = await client.get(fixtures_url)
+            home.raise_for_status()
+            fixtures.raise_for_status()
+
+            home_scripts = set(extract_scripts(home.text or "", str(home.url)))
+            fixture_scripts = extract_scripts(fixtures.text or "", str(fixtures.url))
+            unique = [s for s in fixture_scripts if s not in home_scripts]
+            result["unique_scripts"] = [s.rsplit("/",1)[-1] for s in unique]
+
+            calls = []
+            for src in unique[:20]:
+                try:
+                    r = await client.get(src)
+                    if r.status_code >= 400:
+                        continue
+                    text = r.text or ""
+                    if len(text) > 5000000:
+                        continue
+
+                    search_from = 0
+                    hits = 0
+                    while hits < 20:
+                        idx = text.find("fetch(", search_from)
+                        if idx < 0:
+                            break
+
+                        left = max(0, idx - 2200)
+                        right = min(len(text), idx + 4200)
+                        block = text[left:right]
+                        compact = " ".join(
+                            block.replace("\r"," ").replace("\n"," ").split()
+                        )
+
+                        calls.append({
+                            "script": src.rsplit("/",1)[-1],
+                            "index": idx,
+                            "context": compact[:5200],
+                        })
+
+                        search_from = idx + 6
+                        hits += 1
+                except Exception as exc:
+                    calls.append({
+                        "script": src.rsplit("/",1)[-1],
+                        "error": f"{type(exc).__name__}: {exc}",
+                    })
+
+            result["fetch_calls"] = calls[:40]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets fixture-chunk fetch inspection failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
