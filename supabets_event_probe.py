@@ -3139,3 +3139,122 @@ async def inspect_supabets_competition_embed_logic():
             f"Supabets competition embed inspection failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def rank_supabets_competition_scripts():
+    sports_url = "https://new.supabets.co.za/sports"
+    competition_url = "https://new.supabets.co.za/spa/sport/soccer/england/premier-league"
+    result = {
+        "provider": "Supabets New Site",
+        "competition_url": competition_url,
+        "scripts": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            sports = await client.get(sports_url)
+            competition = await client.get(competition_url)
+            sports.raise_for_status()
+            competition.raise_for_status()
+
+            sports_scripts = set(extract_scripts(sports.text or "", str(sports.url)))
+            competition_scripts = extract_scripts(competition.text or "", str(competition.url))
+            unique = [s for s in competition_scripts if s not in sports_scripts]
+
+            betting_tokens = (
+                "market","odd","odds","eventId","subEvent","subevent","sportId","groupId",
+                "EventsProgram","websocket","wss://","postMessage","iframe","sportsbook",
+                "betting","prematch","live","selection","stake"
+            )
+
+            ranked = []
+            for src in unique[:30]:
+                item = {
+                    "script": src.rsplit("/",1)[-1],
+                    "size": 0,
+                    "score": 0,
+                    "token_counts": {},
+                    "urls": [],
+                }
+                try:
+                    r = await client.get(src)
+                    if r.status_code >= 400:
+                        item["error"] = f"HTTP {r.status_code}"
+                        ranked.append(item)
+                        continue
+                    text = r.text or ""
+                    item["size"] = len(text)
+                    lower = text.lower()
+
+                    score = 0
+                    counts = {}
+                    for token in betting_tokens:
+                        count = lower.count(token.lower())
+                        if count:
+                            counts[token] = count
+                            weight = 3 if token.lower() in ("wss://","websocket","postmessage","iframe","eventsprogram","subevent") else 1
+                            score += count * weight
+                    item["score"] = score
+                    item["token_counts"] = counts
+
+                    urls = []
+                    for scheme in ("https://","http://","wss://","ws://"):
+                        pos = 0
+                        while True:
+                            idx = text.find(scheme, pos)
+                            if idx < 0:
+                                break
+                            end = idx
+                            while end < len(text) and end - idx < 500 and text[end] not in ('"', "'", "`", " ", "\n", "\r", "\\"):
+                                end += 1
+                            url = text[idx:end]
+                            if url and url not in urls:
+                                urls.append(url)
+                            pos = idx + len(scheme)
+                    item["urls"] = urls[:40]
+                    ranked.append(item)
+                except Exception as exc:
+                    item["error"] = f"{type(exc).__name__}: {exc}"
+                    ranked.append(item)
+
+            ranked.sort(key=lambda x: (x.get("score",0), x.get("size",0)), reverse=True)
+            result["scripts"] = ranked
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets competition script ranking failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
