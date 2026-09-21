@@ -4157,3 +4157,180 @@ async def inspect_supabets_unique_live_iframe_chunks():
         )
 
     return result
+
+
+async def inspect_supabets_live_chunks_excluding_demo():
+    sports_url = "https://new.supabets.co.za/sports"
+    live_url = "https://new.supabets.co.za/spa/live/all?mode=iframe"
+    result = {
+        "provider": "Supabets New Site",
+        "sports_url": sports_url,
+        "live_url": live_url,
+        "unique_live_scripts": [],
+        "excluded_demo_scripts": [],
+        "candidate_scripts": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    def extract_urls(text):
+        urls = []
+        for scheme in ("https://","http://","wss://","ws://"):
+            pos = 0
+            while True:
+                idx = text.find(scheme, pos)
+                if idx < 0:
+                    break
+                end = idx
+                while (
+                    end < len(text)
+                    and end - idx < 1000
+                    and text[end] not in ('"', "'", "`", " ", "\n", "\r", "\\", "<", ">", ")", "}")
+                ):
+                    end += 1
+                value = text[idx:end]
+                if value and value not in urls:
+                    urls.append(value)
+                pos = idx + len(scheme)
+        return urls
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            sports = await client.get(sports_url)
+            live = await client.get(live_url)
+            sports.raise_for_status()
+            live.raise_for_status()
+
+            sports_scripts = set(extract_scripts(sports.text or "", str(sports.url)))
+            live_scripts = extract_scripts(live.text or "", str(live.url))
+            unique = [s for s in live_scripts if s not in sports_scripts]
+            result["unique_live_scripts"] = [s.rsplit("/",1)[-1] for s in unique]
+
+            excluded = []
+            candidates = []
+
+            for src in unique[:30]:
+                item = {
+                    "script": src.rsplit("/",1)[-1],
+                    "size": 0,
+                    "reason": None,
+                    "score": 0,
+                    "token_counts": {},
+                    "urls": [],
+                    "network_contexts": [],
+                }
+                try:
+                    r = await client.get(src)
+                    if r.status_code >= 400:
+                        item["reason"] = f"HTTP {r.status_code}"
+                        candidates.append(item)
+                        continue
+
+                    text = r.text or ""
+                    item["size"] = len(text)
+                    if not text or len(text) > 6000000:
+                        item["reason"] = "empty_or_too_large"
+                        candidates.append(item)
+                        continue
+
+                    low = text.lower()
+
+                    demo_signals = (
+                        "girona vs barcelona",
+                        "total odds",
+                        "24.50",
+                        "50.54",
+                        "dev-games.bitville-api.com",
+                        "lotto-product.advbet.com",
+                        "market_config",
+                    )
+                    if sum(1 for s in demo_signals if s in low) >= 2:
+                        item["reason"] = "static_demo_or_games_component"
+                        item["urls"] = extract_urls(text)[:40]
+                        excluded.append(item)
+                        continue
+
+                    tokens = (
+                        "eventid","subevent","sportid","groupid","market","odds",
+                        "selection","prematch","websocket","wss://","/api/",
+                        "api.","sportsbook","bet","live"
+                    )
+
+                    score = 0
+                    for token in tokens:
+                        count = low.count(token)
+                        if count:
+                            item["token_counts"][token] = count
+                            weight = 5 if token in ("eventid","subevent","websocket","wss://","/api/") else 1
+                            score += count * weight
+                    item["score"] = score
+
+                    item["urls"] = [
+                        u for u in extract_urls(text)
+                        if any(k in u.lower() for k in ("api","sport","bet","odd","market","live","supabets"))
+                    ][:80]
+
+                    for needle in ("fetch(", ".get(", ".post(", "axios", "websocket", "wss://", "/api/", "eventid", "subevent"):
+                        pos = 0
+                        hits = 0
+                        while hits < 10:
+                            idx = low.find(needle.lower(), pos)
+                            if idx < 0:
+                                break
+                            left = max(0, idx - 2000)
+                            right = min(len(text), idx + 5000)
+                            context = " ".join(text[left:right].replace("\r"," ").replace("\n"," ").split())
+                            item["network_contexts"].append({
+                                "token": needle,
+                                "index": idx,
+                                "context": context[:6000],
+                            })
+                            pos = idx + len(needle)
+                            hits += 1
+
+                    candidates.append(item)
+
+                except Exception as exc:
+                    item["reason"] = f"{type(exc).__name__}: {exc}"
+                    candidates.append(item)
+
+            candidates.sort(key=lambda x: (x.get("score",0), x.get("size",0)), reverse=True)
+            result["excluded_demo_scripts"] = excluded
+            result["candidate_scripts"] = candidates
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets live chunk filtering failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
