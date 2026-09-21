@@ -3702,3 +3702,152 @@ async def inspect_supabets_competition_html_clues():
         )
 
     return result
+
+
+async def inspect_supabets_direct_public_odds_candidates():
+    pages = [
+        "https://new.supabets.co.za/sports",
+        "https://new.supabets.co.za/spa/sport/soccer/england/premier-league",
+    ]
+    result = {
+        "provider": "Supabets Direct",
+        "pages": [],
+        "candidate_endpoints": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    def extract_abs_urls(text):
+        urls = []
+        for scheme in ("https://","http://","wss://","ws://"):
+            pos = 0
+            while True:
+                idx = text.find(scheme, pos)
+                if idx < 0:
+                    break
+                end = idx
+                while (
+                    end < len(text)
+                    and end - idx < 1000
+                    and text[end] not in ('"', "'", "`", " ", "\n", "\r", "\\", "<", ">", ")", "}")
+                ):
+                    end += 1
+                value = text[idx:end]
+                if value and value not in urls:
+                    urls.append(value)
+                pos = idx + len(scheme)
+        return urls
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            scripts = []
+            for page_url in pages:
+                try:
+                    r = await client.get(page_url)
+                    result["pages"].append({"url": page_url, "status": r.status_code, "final_url": str(r.url)})
+                    r.raise_for_status()
+                    for src in extract_scripts(r.text or "", str(r.url)):
+                        if src not in scripts:
+                            scripts.append(src)
+                except Exception as exc:
+                    result["errors"].append(f"{page_url}: {type(exc).__name__}: {exc}")
+
+            candidates = []
+            seen = set()
+            important_tokens = (
+                "odds","market","eventid","subevent","selection","sportsbook","prematch",
+                "live","websocket","wss://","api/b2c","betwith.supabets.co.za"
+            )
+
+            for src in scripts[:80]:
+                try:
+                    r = await client.get(src)
+                    if r.status_code >= 400:
+                        continue
+                    text = r.text or ""
+                    if not text or len(text) > 6000000:
+                        continue
+                    lower = text.lower()
+
+                    # collect absolute URL candidates from betting-relevant chunks
+                    if not any(t in lower for t in important_tokens):
+                        continue
+
+                    urls = extract_abs_urls(text)
+                    for url in urls:
+                        low = url.lower()
+                        if not any(k in low for k in ("supabets","api","sport","bet","odd","market","game")):
+                            continue
+                        if url in seen:
+                            continue
+                        seen.add(url)
+                        candidates.append({
+                            "script": src.rsplit("/",1)[-1],
+                            "url": url,
+                        })
+
+                    # also capture quoted relative API-ish paths
+                    for marker in ("/api/", "/sports", "/spa/", "/event", "/market", "/odds"):
+                        pos = 0
+                        hits = 0
+                        while hits < 50:
+                            idx = text.find(marker, pos)
+                            if idx < 0:
+                                break
+                            end = idx
+                            while (
+                                end < len(text)
+                                and end - idx < 700
+                                and text[end] not in ('"', "'", "`", " ", "\n", "\r", "\\", "<", ">", ")", "}")
+                            ):
+                                end += 1
+                            path = text[idx:end]
+                            if path and path not in seen:
+                                seen.add(path)
+                                candidates.append({
+                                    "script": src.rsplit("/",1)[-1],
+                                    "url": path,
+                                })
+                            pos = idx + len(marker)
+                            hits += 1
+                except Exception:
+                    continue
+
+            result["candidate_endpoints"] = candidates[:250]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets direct-public odds candidate discovery failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
