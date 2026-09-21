@@ -3518,3 +3518,96 @@ async def inspect_supabets_bitville_loader():
         )
 
     return result
+
+
+async def inspect_supabets_competition_html_payload():
+    url = "https://new.supabets.co.za/spa/sport/soccer/england/premier-league"
+    result = {
+        "provider": "Supabets New Site",
+        "url": url,
+        "status": None,
+        "html_size": 0,
+        "tokens_found": {},
+        "absolute_urls": [],
+        "contexts": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            r = await client.get(url)
+            result["status"] = r.status_code
+            r.raise_for_status()
+            text = r.text or ""
+            result["html_size"] = len(text)
+            lower = text.lower()
+
+            needles = (
+                "__next_f.push",
+                "iframe",
+                "bitville",
+                "advbet",
+                "sportsbook",
+                "betting",
+                "market",
+                "odds",
+                "eventid",
+                "subevent",
+                "groupid",
+                "sportid",
+                "wss://",
+                "websocket",
+                "postmessage",
+            )
+
+            counts = {}
+            contexts = []
+            for needle in needles:
+                count = lower.count(needle.lower())
+                if count:
+                    counts[needle] = count
+                    pos = 0
+                    hits = 0
+                    while hits < 10:
+                        idx = lower.find(needle.lower(), pos)
+                        if idx < 0:
+                            break
+                        left = max(0, idx - 1800)
+                        right = min(len(text), idx + 4200)
+                        compact = " ".join(
+                            text[left:right].replace("\r"," ").replace("\n"," ").split()
+                        )
+                        contexts.append({
+                            "token": needle,
+                            "index": idx,
+                            "context": compact[:5200],
+                        })
+                        pos = idx + len(needle)
+                        hits += 1
+            result["tokens_found"] = counts
+            result["contexts"] = contexts[:100]
+
+            urls = []
+            for scheme in ("https://","http://","wss://","ws://"):
+                pos = 0
+                while True:
+                    idx = text.find(scheme, pos)
+                    if idx < 0:
+                        break
+                    end = idx
+                    while end < len(text) and end - idx < 900 and text[end] not in ('"', "'", "`", " ", "\n", "\r", "\\", "<", ">"):
+                        end += 1
+                    url_value = text[idx:end]
+                    if url_value and url_value not in urls:
+                        urls.append(url_value)
+                    pos = idx + len(scheme)
+            result["absolute_urls"] = urls[:150]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets competition HTML payload inspection failed: {type(exc).__name__}: {exc}"
+        )
+    return result
