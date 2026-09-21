@@ -3851,3 +3851,153 @@ async def inspect_supabets_direct_public_odds_candidates():
         )
 
     return result
+
+
+async def inspect_supabets_live_iframe_route():
+    url = "https://new.supabets.co.za/spa/live/all?mode=iframe"
+    result = {
+        "provider": "Supabets New Site",
+        "url": url,
+        "status": None,
+        "final_url": None,
+        "html_size": 0,
+        "script_count": 0,
+        "scripts": [],
+        "absolute_urls": [],
+        "tokens_found": {},
+        "contexts": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    def extract_urls(text):
+        urls = []
+        for scheme in ("https://","http://","wss://","ws://"):
+            pos = 0
+            while True:
+                idx = text.find(scheme, pos)
+                if idx < 0:
+                    break
+                end = idx
+                while (
+                    end < len(text)
+                    and end - idx < 1000
+                    and text[end] not in ('"', "'", "`", " ", "\n", "\r", "\\", "<", ">", ")", "}")
+                ):
+                    end += 1
+                value = text[idx:end]
+                if value and value not in urls:
+                    urls.append(value)
+                pos = idx + len(scheme)
+        return urls
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            r = await client.get(url)
+            result["status"] = r.status_code
+            result["final_url"] = str(r.url)
+            r.raise_for_status()
+            html = r.text or ""
+            result["html_size"] = len(html)
+
+            scripts = extract_scripts(html, str(r.url))
+            result["script_count"] = len(scripts)
+            result["scripts"] = [s.rsplit("/",1)[-1] for s in scripts]
+            result["absolute_urls"] = extract_urls(html)[:150]
+
+            needles = (
+                "iframe","mode=iframe","market","odds","eventid","subevent",
+                "sportid","groupid","selection","stake","live","prematch",
+                "websocket","wss://","postmessage","api.","/api/","sportsbook"
+            )
+            counts = {}
+            contexts = []
+
+            for needle in needles:
+                count = html.lower().count(needle.lower())
+                if count:
+                    counts[needle] = count
+                    pos = 0
+                    hits = 0
+                    lower = html.lower()
+                    while hits < 12:
+                        idx = lower.find(needle.lower(), pos)
+                        if idx < 0:
+                            break
+                        left = max(0, idx - 1800)
+                        right = min(len(html), idx + 4200)
+                        compact = " ".join(
+                            html[left:right].replace("\r"," ").replace("\n"," ").split()
+                        )
+                        contexts.append({
+                            "token": needle,
+                            "index": idx,
+                            "context": compact[:5200],
+                        })
+                        pos = idx + len(needle)
+                        hits += 1
+
+            # Also inspect route-specific scripts for betting/network clues.
+            script_findings = []
+            for src in scripts[:50]:
+                try:
+                    sr = await client.get(src)
+                    if sr.status_code >= 400:
+                        continue
+                    text = sr.text or ""
+                    if not text or len(text) > 6000000:
+                        continue
+                    low = text.lower()
+                    score_tokens = ("market","odds","eventid","subevent","selection","stake","websocket","wss://","api.","/api/","sportsbook")
+                    score = sum(low.count(t) for t in score_tokens)
+                    if score <= 0:
+                        continue
+                    script_findings.append({
+                        "script": src.rsplit("/",1)[-1],
+                        "score": score,
+                        "urls": [u for u in extract_urls(text) if any(k in u.lower() for k in ("api","sport","bet","odd","market","supabets"))][:50],
+                    })
+                except Exception:
+                    continue
+
+            script_findings.sort(key=lambda x: x.get("score",0), reverse=True)
+            result["tokens_found"] = counts
+            result["contexts"] = contexts[:100]
+            result["script_findings"] = script_findings[:30]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets live iframe inspection failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
