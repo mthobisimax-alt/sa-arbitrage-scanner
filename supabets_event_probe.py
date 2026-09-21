@@ -3611,3 +3611,94 @@ async def inspect_supabets_competition_html_payload():
             f"Supabets competition HTML payload inspection failed: {type(exc).__name__}: {exc}"
         )
     return result
+
+
+async def inspect_supabets_competition_html_clues():
+    url = "https://new.supabets.co.za/spa/sport/soccer/england/premier-league"
+    result = {
+        "provider": "Supabets New Site",
+        "url": url,
+        "status": None,
+        "clues": [],
+        "errors": [],
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            r = await client.get(url)
+            result["status"] = r.status_code
+            r.raise_for_status()
+            text = r.text or ""
+            lower = text.lower()
+
+            needles = (
+                "iframe",
+                "betting",
+                "market",
+                "odds",
+                "betwith.supabets.co.za",
+                "__next_f.push",
+                "src=",
+                "src:",
+            )
+
+            clues = []
+            seen = set()
+            for needle in needles:
+                pos = 0
+                hits = 0
+                n = needle.lower()
+                while hits < 16:
+                    idx = lower.find(n, pos)
+                    if idx < 0:
+                        break
+                    left = max(0, idx - 2600)
+                    right = min(len(text), idx + 6200)
+                    block = text[left:right]
+                    compact = " ".join(
+                        block.replace("\r"," ").replace("\n"," ").split()
+                    )
+
+                    urls = []
+                    for scheme in ("https://","http://","wss://","ws://"):
+                        p = 0
+                        while True:
+                            uidx = block.find(scheme, p)
+                            if uidx < 0:
+                                break
+                            uend = uidx
+                            while (
+                                uend < len(block)
+                                and uend - uidx < 900
+                                and block[uend] not in ('"', "'", "`", " ", "\n", "\r", "\\", "<", ">")
+                            ):
+                                uend += 1
+                            value = block[uidx:uend]
+                            if value and value not in urls:
+                                urls.append(value)
+                            p = uidx + len(scheme)
+
+                    key = (needle, idx)
+                    if key not in seen:
+                        seen.add(key)
+                        clues.append({
+                            "token": needle,
+                            "index": idx,
+                            "urls_nearby": urls[:20],
+                            "context": compact[:7600],
+                        })
+
+                    pos = idx + len(n)
+                    hits += 1
+
+            result["clues"] = clues[:120]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets competition HTML clue inspection failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
