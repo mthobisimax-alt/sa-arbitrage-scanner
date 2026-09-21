@@ -4001,3 +4001,159 @@ async def inspect_supabets_live_iframe_route():
         )
 
     return result
+
+
+async def inspect_supabets_unique_live_iframe_chunks():
+    sports_url = "https://new.supabets.co.za/sports"
+    live_url = "https://new.supabets.co.za/spa/live/all?mode=iframe"
+    result = {
+        "provider": "Supabets New Site",
+        "sports_url": sports_url,
+        "live_url": live_url,
+        "sports_status": None,
+        "live_status": None,
+        "unique_live_scripts": [],
+        "findings": [],
+        "errors": [],
+    }
+
+    def extract_scripts(html, base_url):
+        scripts = []
+        pos = 0
+        while True:
+            start = html.lower().find("<script", pos)
+            if start < 0:
+                break
+            end = html.find(">", start)
+            if end < 0:
+                break
+            tag = html[start:end + 1]
+            low = tag.lower()
+            src_pos = low.find("src=")
+            if src_pos >= 0:
+                value_start = src_pos + 4
+                while value_start < len(tag) and tag[value_start].isspace():
+                    value_start += 1
+                if value_start < len(tag) and tag[value_start] in ('"', "'"):
+                    quote = tag[value_start]
+                    value_end = tag.find(quote, value_start + 1)
+                    if value_end > value_start:
+                        src = urljoin(base_url, tag[value_start + 1:value_end])
+                        if src not in scripts:
+                            scripts.append(src)
+            pos = end + 1
+        return scripts
+
+    def extract_urls(text):
+        urls = []
+        for scheme in ("https://","http://","wss://","ws://"):
+            pos = 0
+            while True:
+                idx = text.find(scheme, pos)
+                if idx < 0:
+                    break
+                end = idx
+                while (
+                    end < len(text)
+                    and end - idx < 1000
+                    and text[end] not in ('"', "'", "`", " ", "\n", "\r", "\\", "<", ">", ")", "}")
+                ):
+                    end += 1
+                value = text[idx:end]
+                if value and value not in urls:
+                    urls.append(value)
+                pos = idx + len(scheme)
+        return urls
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0),
+            follow_redirects=True,
+            headers={"User-Agent":"Mozilla/5.0"},
+        ) as client:
+            sports = await client.get(sports_url)
+            live = await client.get(live_url)
+            result["sports_status"] = sports.status_code
+            result["live_status"] = live.status_code
+            sports.raise_for_status()
+            live.raise_for_status()
+
+            sports_scripts = set(extract_scripts(sports.text or "", str(sports.url)))
+            live_scripts = extract_scripts(live.text or "", str(live.url))
+            unique = [s for s in live_scripts if s not in sports_scripts]
+            result["unique_live_scripts"] = [s.rsplit("/",1)[-1] for s in unique]
+
+            needles = (
+                "market","odds","odd","eventid","subevent","sportid","groupid",
+                "selection","stake","live","prematch","websocket","wss://",
+                "postmessage","iframe","api.","/api/","sportsbook","bet"
+            )
+
+            findings = []
+            for src in unique[:30]:
+                item = {
+                    "script": src.rsplit("/",1)[-1],
+                    "size": 0,
+                    "score": 0,
+                    "token_counts": {},
+                    "urls": [],
+                    "contexts": [],
+                }
+                try:
+                    r = await client.get(src)
+                    if r.status_code >= 400:
+                        item["error"] = f"HTTP {r.status_code}"
+                        findings.append(item)
+                        continue
+                    text = r.text or ""
+                    item["size"] = len(text)
+                    if not text or len(text) > 6000000:
+                        findings.append(item)
+                        continue
+                    lower = text.lower()
+
+                    score = 0
+                    for needle in needles:
+                        count = lower.count(needle.lower())
+                        if count:
+                            item["token_counts"][needle] = count
+                            weight = 4 if needle.lower() in ("websocket","wss://","postmessage","subevent","eventid","/api/") else 1
+                            score += count * weight
+                    item["score"] = score
+                    item["urls"] = [
+                        u for u in extract_urls(text)
+                        if any(k in u.lower() for k in ("api","sport","bet","odd","market","live","supabets"))
+                    ][:80]
+
+                    for needle in ("eventid","subevent","market","odds","websocket","wss://","/api/","postmessage"):
+                        pos = 0
+                        hits = 0
+                        n = needle.lower()
+                        while hits < 8:
+                            idx = lower.find(n, pos)
+                            if idx < 0:
+                                break
+                            left = max(0, idx - 1800)
+                            right = min(len(text), idx + 4200)
+                            compact = " ".join(text[left:right].replace("\r"," ").replace("\n"," ").split())
+                            item["contexts"].append({
+                                "token": needle,
+                                "index": idx,
+                                "context": compact[:5200],
+                            })
+                            pos = idx + len(n)
+                            hits += 1
+                    findings.append(item)
+                except Exception as exc:
+                    item["error"] = f"{type(exc).__name__}: {exc}"
+                    findings.append(item)
+
+            findings.sort(key=lambda x: (x.get("score",0), x.get("size",0)), reverse=True)
+            result["findings"] = findings[:30]
+
+    except Exception as exc:
+        result["errors"].append(
+            f"Supabets unique live iframe chunk inspection failed: {type(exc).__name__}: {exc}"
+        )
+
+    return result
